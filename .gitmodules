@@ -1,0 +1,6 @@
+[submodule "app/orchestrator-api"]
+	path = app/orchestrator-api
+	url = git@github.com:syed-mohd-fasih/zentrion-orchestrator-api.git
+[submodule "app/dashboard"]
+	path = app/dashboard
+	url = git@github.com:syed-mohd-fasih/zentrion-dashboard.git
