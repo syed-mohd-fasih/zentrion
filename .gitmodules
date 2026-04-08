@@ -1,6 +1,8 @@
 [submodule "app/orchestrator-api"]
 	path = app/orchestrator-api
 	url = https://github.com/syed-mohd-fasih/zentrion-orchestrator-api.git
+	branch = main
 [submodule "app/dashboard"]
 	path = app/dashboard
 	url = https://github.com/syed-mohd-fasih/zentrion-dashboard.git
+	branch = main
