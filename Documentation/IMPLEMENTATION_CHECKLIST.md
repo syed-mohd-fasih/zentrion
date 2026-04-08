@@ -106,67 +106,32 @@ kubectl port-forward -n istio-system svc/kiali 20001:20001 &
 
 ---
 
-## 📦 **Phase 2: Code Setup**
+## ✅ **Phase 2: Code Setup — COMPLETE**
 
-### ☐ Update Backend Code
+All code is production-ready. No action needed. Summary of what was done:
 
-1. **Install new dependencies:**
+1. **Dependencies installed** — all packages in `app/orchestrator-api/package.json`:
+   - `@kubernetes/client-node`, `@nestjs/typeorm`, `typeorm`, `pg`, `@nestjs/event-emitter`, `@nestjs/schedule`, `bcrypt`
 
-```bash
-cd apps/orchestrator-api
-pnpm add @kubernetes/client-node @nestjs/typeorm typeorm pg @nestjs/event-emitter @nestjs/schedule bcrypt
-```
+2. **New modules created** (all in `app/orchestrator-api/src/modules/`):
+   - `database/` — TypeORM + PostgreSQL + 7 entities
+   - `istio/` — Envoy log watcher (emits telemetry events)
+   - `crd/` — SecurityProfile / AnomalyRecord / PolicyHistory CRD management
+   - `service-discovery/` — K8s deployment watcher
+   - `events/` — Internal EventEmitter2 pub/sub
 
-2. **Create new files** (from artifacts provided):
+3. **All existing files migrated from in-memory store to PostgreSQL:**
+   - `auth.service.ts` + `jwt.strategy.ts` — UserRepository + bcrypt
+   - `telemetry.service.ts` — `@OnEvent('telemetry.log')` → DB. Synthetic generator removed.
+   - `anomaly.service.ts` — reads TelemetryLog from DB, saves Anomaly to DB
+   - `policy.service.ts` — PolicyDraft + PolicyHistory + Anomaly all in DB
+   - All module files updated with `TypeOrmModule.forFeature([...])`
 
-```
-modules/database/
-  ├── database.module.ts
-  └── entities/
-      ├── telemetry-log.entity.ts
-      ├── anomaly.entity.ts
-      ├── policy-draft.entity.ts
-      ├── policy-history.entity.ts
-      ├── service.entity.ts
-      └── user.entity.ts
+4. **Deleted**: `src/common/store.ts` (in-memory mock) — fully replaced by PostgreSQL
 
-modules/istio/
-  ├── istio.module.ts
-  └── istio.service.ts
+5. **Dockerfile** at `app/orchestrator-api/Dockerfile` — ✅ ready
 
-modules/crd/
-  ├── crd.module.ts
-  └── crd.service.ts
-
-modules/service-discovery/
-  ├── service-discovery.module.ts
-  └── service-discovery.service.ts
-```
-
-3. **Update existing files:**
-
-- ☐ `app.module.ts` - Import new modules
-- ☐ `modules/k8s/k8s.service.ts` - Replace with real implementation
-- ☐ `modules/telemetry/telemetry.service.ts` - Use real Istio data
-- ☐ `modules/anomaly/anomaly.service.ts` - Use database
-- ☐ `modules/policy/policy.service.ts` - Use database + CRDs
-- ☐ `bootstrap/seed.ts` - Seed database users
-- ☐ `package.json` - Update dependencies
-
-4. **Create Dockerfile:**
-
-```bash
-# Copy Dockerfile from artifacts to apps/orchestrator-api/
-```
-
-5. **Verify code compiles:**
-
-```bash
-pnpm build
-# Should build without errors
-```
-
-**✅ Phase 2 Complete** - Code is production-ready!
+See `Documentation/FILE_INDEX.md` for complete file status.
 
 ---
 
@@ -224,7 +189,7 @@ kubectl get pvc -n zentrion-system
 eval $(minikube docker-env)
 
 # Build
-cd apps/orchestrator-api
+cd app/orchestrator-api
 docker build -t zentrion/orchestrator-api:latest .
 
 # Verify
@@ -379,7 +344,7 @@ istioctl dashboard kiali
 
 ```bash
 # Navigate to frontend app
-cd apps/dashboard
+cd app/dashboard
 
 # Install dependencies
 pnpm install

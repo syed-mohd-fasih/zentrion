@@ -1,235 +1,182 @@
 # Zentrion Complete File Index
 
-Every file you need to build the production system.
+Every file in the production system.
 
 ---
 
-## 📚 **Documentation Files (7 files)**
+## 📚 **Documentation Files**
 
 | File | Description | Status |
 |------|-------------|--------|
-| `README.md` | Main documentation | ✅ Created |
-| `QUICKSTART.md` | 30-minute setup guide | ✅ Created |
-| `ENVIRONMENT_SETUP.md` | Cluster setup (minikube + Istio) | ✅ Created |
-| `DEPLOYMENT.md` | Deployment guide | ✅ Created |
-| `CODE_MIGRATION.md` | Mock → Production migration | ✅ Created |
-| `IMPLEMENTATION_CHECKLIST.md` | Step-by-step checklist | ✅ Created |
-| `FILE_INDEX.md` | This file | ✅ Created |
+| `README.md` | Main documentation | ✅ Done |
+| `QUICKSTART.md` | 30-minute setup guide | ✅ Done |
+| `ENVIRONMENT_SETUP.md` | Cluster setup (minikube + Istio) | ✅ Done |
+| `DEPLOYMENT.md` | Deployment guide | ✅ Done |
+| `CODE_MIGRATION.md` | Mock → Production migration reference | ✅ Done |
+| `Documentation/IMPLEMENTATION_CHECKLIST.md` | Step-by-step checklist | ✅ Done |
+| `Documentation/FILE_INDEX.md` | This file | ✅ Done |
 
 ---
 
-## 🐳 **Docker Files (2 files)**
+## 🐳 **Docker Files**
 
 | File | Description | Status |
 |------|-------------|--------|
-| `apps/orchestrator-api/Dockerfile` | Container build | ✅ Created |
-| `apps/orchestrator-api/.dockerignore` | Docker ignore | ✅ Created |
+| `app/orchestrator-api/Dockerfile` | Container build | ✅ Done |
+| `app/orchestrator-api/.dockerignore` | Docker ignore | ✅ Done |
 
 ---
 
-## 📦 **Kubernetes Manifests (13 files)**
+## 📦 **Kubernetes Manifests**
 
 ### CRDs (3 files)
 | File | Description | Status |
 |------|-------------|--------|
-| `manifests/crds/security-profile.yaml` | SecurityProfile CRD | ✅ Created |
-| `manifests/crds/policy-history.yaml` | PolicyHistory CRD | ✅ Created |
-| `manifests/crds/anomaly-record.yaml` | AnomalyRecord CRD | ✅ Created |
+| `manifests/crds/security-profile.yaml` | SecurityProfile CRD | ✅ Done |
+| `manifests/crds/policy-history.yaml` | PolicyHistory CRD | ✅ Done |
+| `manifests/crds/anomaly-record.yaml` | AnomalyRecord CRD | ✅ Done |
 
 ### Infrastructure (5 files)
 | File | Description | Status |
 |------|-------------|--------|
-| `manifests/rbac.yaml` | RBAC (ClusterRole, ServiceAccount) | ✅ Created |
-| `manifests/postgresql.yaml` | PostgreSQL deployment | ✅ Created |
-| `manifests/orchestrator-configmap.yaml` | Configuration | ✅ Created |
-| `manifests/orchestrator-deployment.yaml` | Main deployment | ✅ Created |
-| `deploy.sh` | One-command deployment script | ✅ Created |
+| `manifests/rbac.yaml` | RBAC (ClusterRole, ServiceAccount) | ✅ Done |
+| `manifests/postgresql.yaml` | PostgreSQL deployment | ✅ Done |
+| `manifests/orchestrator-configmap.yaml` | Configuration | ✅ Done |
+| `manifests/orchestrator-deployment.yaml` | Main deployment | ✅ Done |
+| `deploy.sh` | One-command deployment script | ✅ Done |
 
 ---
 
-## 💻 **Backend Source Code (35+ files)**
+## 💻 **Backend Source Code**
 
-### Core Application (4 files)
+### Core Application
 | File | Description | Status |
 |------|-------------|--------|
-| `src/main.ts` | Application bootstrap | 📝 Update needed |
-| `src/app.module.ts` | Root module | ✅ Created |
-| `src/health.controller.ts` | Health check endpoint | ✅ Already exists |
-| `src/config/app.config.ts` | Configuration | ✅ Created |
+| `src/main.ts` | Application bootstrap | ✅ Done |
+| `src/app.module.ts` | Root module (all modules wired) | ✅ Done |
+| `src/health.controller.ts` | Health check endpoint | ✅ Done |
+| `src/config/app.config.ts` | Configuration (synthetic config removed) | ✅ Done |
 
-### Database Module (8 files)
+### Database Module (7 files)
 | File | Description | Status |
 |------|-------------|--------|
-| `src/modules/database/database.module.ts` | Database module | ✅ Created |
-| `src/modules/database/entities/telemetry-log.entity.ts` | Telemetry entity | ✅ Created |
-| `src/modules/database/entities/anomaly.entity.ts` | Anomaly entity | ✅ Created |
-| `src/modules/database/entities/policy-draft.entity.ts` | Policy draft entity | ✅ Created |
-| `src/modules/database/entities/policy-history.entity.ts` | Policy history entity | ✅ Created |
-| `src/modules/database/entities/service.entity.ts` | Service entity | ✅ Created |
-| `src/modules/database/entities/user.entity.ts` | User entity | ✅ Created |
+| `src/modules/database/database.module.ts` | TypeORM + PostgreSQL setup | ✅ Done |
+| `src/modules/database/entities/telemetry-log.entity.ts` | Telemetry log entity | ✅ Done |
+| `src/modules/database/entities/anomaly.entity.ts` | Anomaly entity | ✅ Done |
+| `src/modules/database/entities/policy-draft.entity.ts` | Policy draft entity | ✅ Done |
+| `src/modules/database/entities/policy-history.entity.ts` | Policy history entity | ✅ Done |
+| `src/modules/database/entities/service.entity.ts` | Service entity | ✅ Done |
+| `src/modules/database/entities/user.entity.ts` | User entity | ✅ Done |
 
-### Auth Module (5 files)
+### Auth Module
 | File | Description | Status |
 |------|-------------|--------|
-| `src/modules/auth/auth.module.ts` | Auth module | ✅ Already exists |
-| `src/modules/auth/auth.service.ts` | Auth service | 📝 Update for bcrypt |
-| `src/modules/auth/auth.controller.ts` | Auth endpoints | ✅ Already exists |
-| `src/modules/auth/jwt.strategy.ts` | JWT strategy | ✅ Already exists |
-| `src/modules/auth/jwt-auth.guard.ts` | Auth guard | ✅ Already exists |
-| `src/modules/auth/roles.guard.ts` | Roles guard | ✅ Already exists |
+| `src/modules/auth/auth.module.ts` | Auth module (UserRepository registered) | ✅ Done |
+| `src/modules/auth/auth.service.ts` | Auth service (UserRepository + bcrypt) | ✅ Done |
+| `src/modules/auth/auth.controller.ts` | Auth endpoints | ✅ Done |
+| `src/modules/auth/jwt.strategy.ts` | JWT strategy (UserRepository) | ✅ Done |
+| `src/modules/auth/jwt-auth.guard.ts` | Auth guard | ✅ Done |
+| `src/modules/auth/roles.guard.ts` | Roles guard | ✅ Done |
 
-### K8s Module (3 files)
+### K8s Module
 | File | Description | Status |
 |------|-------------|--------|
-| `src/modules/k8s/k8s.module.ts` | K8s module | ✅ Already exists |
-| `src/modules/k8s/k8s.service.ts` | **REPLACE with real K8s client** | ✅ Created |
-| `src/modules/k8s/istio.builder.ts` | Policy YAML builder | ✅ Already exists |
+| `src/modules/k8s/k8s.module.ts` | K8s module | ✅ Done |
+| `src/modules/k8s/k8s.service.ts` | Real K8s client (`@kubernetes/client-node`) | ✅ Done |
+| `src/modules/k8s/istio.builder.ts` | Istio AuthorizationPolicy YAML builder | ✅ Done |
 
-### Istio Module (2 files)
+### Istio Module
 | File | Description | Status |
 |------|-------------|--------|
-| `src/modules/istio/istio.module.ts` | Istio module | ✅ Created |
-| `src/modules/istio/istio.service.ts` | Telemetry watcher | ✅ Created |
+| `src/modules/istio/istio.module.ts` | Istio module | ✅ Done |
+| `src/modules/istio/istio.service.ts` | Envoy log watcher (emits `telemetry.log` events) | ✅ Done |
 
-### CRD Module (2 files)
+### CRD Module
 | File | Description | Status |
 |------|-------------|--------|
-| `src/modules/crd/crd.module.ts` | CRD module | ✅ Created |
-| `src/modules/crd/crd.service.ts` | CRD management | ✅ Created |
+| `src/modules/crd/crd.module.ts` | CRD module | ✅ Done |
+| `src/modules/crd/crd.service.ts` | SecurityProfile / AnomalyRecord / PolicyHistory CRD management | ✅ Done |
 
-### Service Discovery Module (2 files)
+### Service Discovery Module
 | File | Description | Status |
 |------|-------------|--------|
-| `src/modules/service-discovery/service-discovery.module.ts` | Service discovery module | ✅ Created |
-| `src/modules/service-discovery/service-discovery.service.ts` | Deployment watcher | ✅ Created |
+| `src/modules/service-discovery/service-discovery.module.ts` | Service discovery module | ✅ Done |
+| `src/modules/service-discovery/service-discovery.service.ts` | Deployment watcher → writes to `services` table | ✅ Done |
 
-### Telemetry Module (4 files)
+### Events Module (internal pub/sub)
 | File | Description | Status |
 |------|-------------|--------|
-| `src/modules/telemetry/telemetry.module.ts` | Telemetry module | 📝 Update imports |
-| `src/modules/telemetry/telemetry.service.ts` | **UPDATE to use real data** | 📝 Update needed |
-| `src/modules/telemetry/telemetry.controller.ts` | Telemetry endpoints | 📝 Update for DB |
-| `src/modules/telemetry/telemetry.gateway.ts` | WebSocket gateway | ✅ Already exists |
+| `src/modules/events/events.module.ts` | EventEmitter2 module | ✅ Done |
+| `src/modules/events/events.service.ts` | Internal event emit/subscribe helper | ✅ Done |
 
-### Anomaly Module (3 files)
+### Telemetry Module
 | File | Description | Status |
 |------|-------------|--------|
-| `src/modules/anomaly/anomaly.module.ts` | Anomaly module | 📝 Update imports |
-| `src/modules/anomaly/anomaly.service.ts` | **UPDATE to use DB + CRDs** | 📝 Update needed |
-| `src/modules/anomaly/anomaly.controller.ts` | Anomaly endpoints | 📝 Update for DB |
+| `src/modules/telemetry/telemetry.module.ts` | Telemetry module (TelemetryLog + Service repos) | ✅ Done |
+| `src/modules/telemetry/telemetry.service.ts` | `@OnEvent('telemetry.log')` → saves to PostgreSQL | ✅ Done |
+| `src/modules/telemetry/telemetry.controller.ts` | REST endpoints (DB queries) | ✅ Done |
+| `src/modules/telemetry/telemetry.gateway.ts` | WebSocket gateway (emits real-time events) | ✅ Done |
 
-### Policy Module (4 files)
+### Anomaly Module
 | File | Description | Status |
 |------|-------------|--------|
-| `src/modules/policy/policy.module.ts` | Policy module | 📝 Update imports |
-| `src/modules/policy/policy.service.ts` | **UPDATE to use DB + K8s** | 📝 Update needed |
-| `src/modules/policy/policy.controller.ts` | Policy endpoints | 📝 Update for DB |
-| `src/modules/policy/policy.dto.ts` | DTOs | ✅ Already exists |
+| `src/modules/anomaly/anomaly.module.ts` | Anomaly module (Anomaly + TelemetryLog repos) | ✅ Done |
+| `src/modules/anomaly/anomaly.service.ts` | 8 detection rules, reads from DB, saves to DB | ✅ Done |
+| `src/modules/anomaly/anomaly.controller.ts` | REST endpoints (DB queries) | ✅ Done |
 
-### Bootstrap (1 file)
+### Policy Module
 | File | Description | Status |
 |------|-------------|--------|
-| `src/bootstrap/seed.ts` | **UPDATE for database seeding** | ✅ Created |
+| `src/modules/policy/policy.module.ts` | Policy module (PolicyDraft + PolicyHistory + Anomaly repos) | ✅ Done |
+| `src/modules/policy/policy.service.ts` | Full workflow: DB-backed drafts/history, applies to K8s | ✅ Done |
+| `src/modules/policy/policy.controller.ts` | REST endpoints (DB queries, no store imports) | ✅ Done |
+| `src/modules/policy/policy.dto.ts` | Request DTOs | ✅ Done |
 
-### Package Management (1 file)
+### Bootstrap
 | File | Description | Status |
 |------|-------------|--------|
-| `apps/orchestrator-api/package.json` | **UPDATE dependencies** | ✅ Created |
+| `src/bootstrap/seed.ts` | Seeds 3 default users (admin/analyst/viewer) to PostgreSQL | ✅ Done |
 
 ---
 
 ## ✅ **Files Status Summary**
 
-### ✅ **Completed (Ready to Use)**
-- All documentation (7 files)
-- All Kubernetes manifests (13 files)
-- All database entities (7 files)
-- All new modules (Istio, CRD, Service Discovery)
-- Real K8s service
-- Updated app.module.ts
-- Updated config
-- Dockerfile
+All backend files are production-ready. No in-memory store usage remains in any module.
 
-### 📝 **Need Updates (Existing Files)**
-The following existing files need updates as per CODE_MIGRATION.md:
+### Deleted
+- `src/common/store.ts` — removed; all data now persists in PostgreSQL
 
-1. `src/modules/auth/auth.service.ts` - Add bcrypt for password hashing
-2. `src/modules/telemetry/telemetry.service.ts` - Remove synthetic generator, use Istio events
-3. `src/modules/telemetry/telemetry.controller.ts` - Query from database
-4. `src/modules/anomaly/anomaly.service.ts` - Use database + create CRDs
-5. `src/modules/anomaly/anomaly.controller.ts` - Query from database
-6. `src/modules/policy/policy.service.ts` - Use database + apply to real cluster
-7. `src/modules/policy/policy.controller.ts` - Query from database
+### Notes
+- **Sessions**: Auth token revocation tracked in an in-memory Map in `auth.service.ts`. Acceptable for FYP scope (sessions clear on app restart).
+- **Istio telemetry**: `IstioService` watches Envoy logs and emits `telemetry.log` events. `TelemetryService` listens via `@OnEvent` and persists to DB.
+- **No synthetic data**: The synthetic telemetry generator has been removed. All logs come from real Istio/Envoy traffic.
 
 ---
 
-## 🔄 **Update Instructions**
-
-### For files marked "📝 Update needed":
-
-See **CODE_MIGRATION.md** for complete code examples of each update.
-
-**Quick summary:**
-1. Add database repository injections
-2. Replace in-memory store calls with database queries
-3. Add CRD creation calls
-4. Add event emitter listeners
-5. Remove synthetic data generators
-
----
-
-## 📦 **New Dependencies to Install**
+## 📦 **Dependencies (already installed)**
 
 ```bash
-cd apps/orchestrator-api
-pnpm add @kubernetes/client-node @nestjs/typeorm typeorm pg @nestjs/event-emitter @nestjs/schedule bcrypt
-pnpm add -D @types/bcrypt
+# All packages are in package.json
+@kubernetes/client-node
+@nestjs/typeorm
+@nestjs/event-emitter
+@nestjs/schedule
+typeorm
+pg
+bcrypt
 ```
 
 ---
 
-## 🚀 **Deployment Order**
+## 🚀 **What's Left (Phase 3: Deployment)**
 
-1. ✅ Setup environment (ENVIRONMENT_SETUP.md)
-2. ✅ Create all new files listed above
-3. ✅ Update existing files (see CODE_MIGRATION.md)
-4. ✅ Install dependencies
-5. ✅ Build Docker image
-6. ✅ Run `./deploy.sh`
+1. ☐ Setup minikube cluster + Istio (see ENVIRONMENT_SETUP.md)
+2. ☐ Apply CRDs: `kubectl apply -f manifests/crds/`
+3. ☐ Apply RBAC: `kubectl apply -f manifests/rbac.yaml`
+4. ☐ Deploy PostgreSQL: `kubectl apply -f manifests/postgresql.yaml`
+5. ☐ Build Docker image and push to minikube
+6. ☐ Deploy Zentrion: `kubectl apply -f manifests/` or `./deploy.sh`
+7. ☐ Deploy sample app (Bookinfo) and generate traffic
+8. ☐ Connect Next.js dashboard
 
----
-
-## 📊 **File Count**
-
-- **Documentation**: 7 files
-- **Docker**: 2 files
-- **Kubernetes**: 13 files
-- **Backend (new)**: 23 files
-- **Backend (update)**: 7 files
-- **Total**: 52 files
-
----
-
-## ✅ **Verification**
-
-After deployment, verify:
-```bash
-# All files in place
-find . -name "*.ts" -path "*/modules/database/*" | wc -l
-# Should show: 7
-
-find . -name "*.yaml" -path "*/manifests/*" | wc -l
-# Should show: 8
-
-# Build succeeds
-cd apps/orchestrator-api && pnpm build
-
-# Deploy succeeds
-./deploy.sh
-```
-
----
-
-**You have everything you need!** 🎉
-
-Follow **QUICKSTART.md** for a 30-minute guided setup or **IMPLEMENTATION_CHECKLIST.md** for step-by-step instructions.
+See DEPLOYMENT.md or run `./deploy.sh` for automated deployment.
