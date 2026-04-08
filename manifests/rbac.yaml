@@ -1,0 +1,121 @@
+# ServiceAccount for Orchestrator
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: zentrion-orchestrator
+  namespace: zentrion-system
+  labels:
+    app: zentrion-orchestrator
+    component: security
+
+---
+# ClusterRole - Full permissions needed by orchestrator
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: zentrion-orchestrator-role
+  labels:
+    app: zentrion-orchestrator
+rules:
+  # Read deployments, pods, services (for service discovery)
+  - apiGroups: ["apps"]
+    resources: ["deployments", "replicasets", "statefulsets", "daemonsets"]
+    verbs: ["get", "list", "watch"]
+  
+  - apiGroups: [""]
+    resources: ["pods", "services", "endpoints", "namespaces"]
+    verbs: ["get", "list", "watch"]
+  
+  # Manage Istio security policies
+  - apiGroups: ["security.istio.io"]
+    resources:
+      - "authorizationpolicies"
+      - "peerauthentications"
+      - "requestauthentications"
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  
+  # Manage Istio networking
+  - apiGroups: ["networking.istio.io"]
+    resources:
+      - "destinationrules"
+      - "virtualservices"
+      - "gateways"
+      - "serviceentries"
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  
+  # Read Istio configuration
+  - apiGroups: ["config.istio.io"]
+    resources: ["*"]
+    verbs: ["get", "list", "watch"]
+  
+  # Manage Zentrion CRDs
+  - apiGroups: ["zentrion.io"]
+    resources:
+      - "securityprofiles"
+      - "policyhistories"
+      - "anomalyrecords"
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  
+  # Read Kubernetes NetworkPolicies (for awareness)
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies"]
+    verbs: ["get", "list", "watch"]
+  
+  # Read events (for debugging)
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["get", "list", "watch"]
+  
+  # Access to metrics (Prometheus integration)
+  - apiGroups: [""]
+    resources: ["nodes/metrics", "nodes/stats"]
+    verbs: ["get"]
+
+---
+# ClusterRoleBinding - Bind role to ServiceAccount
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: zentrion-orchestrator-binding
+  labels:
+    app: zentrion-orchestrator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: zentrion-orchestrator-role
+subjects:
+  - kind: ServiceAccount
+    name: zentrion-orchestrator
+    namespace: zentrion-system
+
+---
+# Role for reading ConfigMaps and Secrets in zentrion-system namespace
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: zentrion-orchestrator-local-role
+  namespace: zentrion-system
+  labels:
+    app: zentrion-orchestrator
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps", "secrets"]
+    verbs: ["get", "list", "watch"]
+
+---
+# RoleBinding for local namespace permissions
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: zentrion-orchestrator-local-binding
+  namespace: zentrion-system
+  labels:
+    app: zentrion-orchestrator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: zentrion-orchestrator-local-role
+subjects:
+  - kind: ServiceAccount
+    name: zentrion-orchestrator
+    namespace: zentrion-system

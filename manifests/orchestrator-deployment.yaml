@@ -1,0 +1,165 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: zentrion-orchestrator
+  namespace: zentrion-system
+  labels:
+    app: zentrion-orchestrator
+    component: control-plane
+    version: v1
+spec:
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app: zentrion-orchestrator
+  template:
+    metadata:
+      labels:
+        app: zentrion-orchestrator
+        component: control-plane
+        version: v1
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "3001"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: zentrion-orchestrator
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+        - name: orchestrator
+          image: zentrion/orchestrator-api:latest  # Replace with your image
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 3001
+              name: http
+              protocol: TCP
+          env:
+            # Config from ConfigMap
+            - name: PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: orchestrator-config
+                  key: PORT
+            - name: NODE_ENV
+              valueFrom:
+                configMapKeyRef:
+                  name: orchestrator-config
+                  key: NODE_ENV
+            - name: JWT_EXPIRES_IN
+              valueFrom:
+                configMapKeyRef:
+                  name: orchestrator-config
+                  key: JWT_EXPIRES_IN
+            - name: DB_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: orchestrator-config
+                  key: DB_HOST
+            - name: DB_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: orchestrator-config
+                  key: DB_PORT
+            - name: DB_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: orchestrator-config
+                  key: DB_NAME
+            - name: K8S_IN_CLUSTER
+              valueFrom:
+                configMapKeyRef:
+                  name: orchestrator-config
+                  key: K8S_IN_CLUSTER
+            - name: ISTIO_NAMESPACE
+              valueFrom:
+                configMapKeyRef:
+                  name: orchestrator-config
+                  key: ISTIO_NAMESPACE
+            - name: LOG_LEVEL
+              valueFrom:
+                configMapKeyRef:
+                  name: orchestrator-config
+                  key: LOG_LEVEL
+            
+            # Secrets
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: orchestrator-secret
+                  key: JWT_SECRET
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgresql-secret
+                  key: POSTGRES_PASSWORD
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "250m"
+            limits:
+              memory: "1Gi"
+              cpu: "500m"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 3001
+              scheme: HTTP
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3001
+              scheme: HTTP
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+
+---
+# Orchestrator Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: zentrion-orchestrator
+  namespace: zentrion-system
+  labels:
+    app: zentrion-orchestrator
+spec:
+  type: ClusterIP
+  ports:
+    - port: 3001
+      targetPort: 3001
+      protocol: TCP
+      name: http
+  selector:
+    app: zentrion-orchestrator
+
+---
+# Orchestrator Secret
+apiVersion: v1
+kind: Secret
+metadata:
+  name: orchestrator-secret
+  namespace: zentrion-system
+  labels:
+    app: zentrion-orchestrator
+type: Opaque
+stringData:
+  JWT_SECRET: "zentrion-orchestrator-secret-key-change-in-production-use-kubectl-create-secret"

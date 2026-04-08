@@ -1,0 +1,44 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: orchestrator-config
+  namespace: zentrion-system
+  labels:
+    app: zentrion-orchestrator
+data:
+  # Application config
+  PORT: "3001"
+  NODE_ENV: "production"
+  
+  # JWT config
+  JWT_EXPIRES_IN: "24h"
+  
+  # PostgreSQL config
+  DB_HOST: "postgresql.zentrion-system.svc.cluster.local"
+  DB_PORT: "5432"
+  DB_NAME: "zentrion"
+  DB_USER: "zentrion"
+  
+  # Telemetry config (real telemetry from Istio)
+  TELEMETRY_SOURCE: "istio"
+  TELEMETRY_ENABLED: "true"
+  
+  # Anomaly detection config
+  ANOMALY_DETECTION_INTERVAL_MS: "5000"
+  ANOMALY_DETECTION_ENABLED: "true"
+  
+  # Policy config
+  POLICY_AUTO_GENERATE: "true"
+  POLICY_APPLY_ENABLED: "true"
+  
+  # Kubernetes config
+  K8S_IN_CLUSTER: "true"
+  K8S_WATCH_NAMESPACES: "all"  # or comma-separated: "default,production"
+  
+  # Istio config
+  ISTIO_NAMESPACE: "istio-system"
+  ISTIO_TELEMETRY_ENABLED: "true"
+  
+  # Logging
+  LOG_LEVEL: "info"
+  LOG_FORMAT: "json"

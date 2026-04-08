@@ -1,0 +1,114 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: policyhistories.zentrion.io
+  annotations:
+    description: "Audit trail of all policy lifecycle events"
+spec:
+  group: zentrion.io
+  names:
+    kind: PolicyHistory
+    listKind: PolicyHistoryList
+    plural: policyhistories
+    singular: policyhistory
+    shortNames:
+      - ph
+      - polhist
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              required:
+                - policyId
+                - action
+                - timestamp
+                - userId
+              properties:
+                policyId:
+                  type: string
+                  description: "ID of the policy this history entry refers to"
+                policyName:
+                  type: string
+                  description: "Name of the AuthorizationPolicy in K8s"
+                action:
+                  type: string
+                  enum:
+                    - created
+                    - approved
+                    - rejected
+                    - applied
+                    - updated
+                    - deleted
+                  description: "Action performed on the policy"
+                timestamp:
+                  type: string
+                  format: date-time
+                  description: "When this action occurred"
+                userId:
+                  type: string
+                  description: "User who performed this action"
+                userName:
+                  type: string
+                  description: "Human-readable username"
+                userRole:
+                  type: string
+                  enum:
+                    - ADMIN
+                    - ANALYST
+                    - VIEWER
+                    - SYSTEM
+                  description: "Role of the user"
+                details:
+                  type: string
+                  description: "Human-readable description of what happened"
+                reason:
+                  type: string
+                  description: "Reason provided by user (for rejections, etc.)"
+                anomalyId:
+                  type: string
+                  description: "ID of anomaly that triggered this policy (if applicable)"
+                serviceName:
+                  type: string
+                  description: "Service this policy applies to"
+                namespace:
+                  type: string
+                  description: "Namespace of the service"
+                policyYaml:
+                  type: string
+                  description: "Full YAML of the policy at this point in time"
+                metadata:
+                  type: object
+                  x-kubernetes-preserve-unknown-fields: true
+                  description: "Additional metadata"
+            status:
+              type: object
+              properties:
+                recorded:
+                  type: boolean
+                  description: "Whether this entry has been recorded in external audit system"
+                recordedAt:
+                  type: string
+                  format: date-time
+      additionalPrinterColumns:
+        - name: Policy
+          type: string
+          jsonPath: .spec.policyName
+        - name: Action
+          type: string
+          jsonPath: .spec.action
+        - name: User
+          type: string
+          jsonPath: .spec.userName
+        - name: Service
+          type: string
+          jsonPath: .spec.serviceName
+        - name: Time
+          type: date
+          jsonPath: .spec.timestamp

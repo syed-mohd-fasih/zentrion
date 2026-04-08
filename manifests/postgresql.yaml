@@ -1,0 +1,254 @@
+# PostgreSQL Secret
+apiVersion: v1
+kind: Secret
+metadata:
+  name: postgresql-secret
+  namespace: zentrion-system
+  labels:
+    app: postgresql
+type: Opaque
+stringData:
+  POSTGRES_USER: zentrion
+  POSTGRES_PASSWORD: zentrion-secret-password-change-in-prod
+  POSTGRES_DB: zentrion
+
+---
+# PostgreSQL PersistentVolumeClaim
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgresql-pvc
+  namespace: zentrion-system
+  labels:
+    app: postgresql
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+  storageClassName: standard  # minikube default storage class
+
+---
+# PostgreSQL Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgresql
+  namespace: zentrion-system
+  labels:
+    app: postgresql
+    component: database
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgresql
+  template:
+    metadata:
+      labels:
+        app: postgresql
+        component: database
+    spec:
+      containers:
+        - name: postgresql
+          image: postgres:15-alpine
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 5432
+              name: postgres
+              protocol: TCP
+          env:
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: postgresql-secret
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgresql-secret
+                  key: POSTGRES_PASSWORD
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef:
+                  name: postgresql-secret
+                  key: POSTGRES_DB
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          volumeMounts:
+            - name: postgresql-storage
+              mountPath: /var/lib/postgresql/data
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "250m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+          livenessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - zentrion
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - zentrion
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+      volumes:
+        - name: postgresql-storage
+          persistentVolumeClaim:
+            claimName: postgresql-pvc
+
+---
+# PostgreSQL Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgresql
+  namespace: zentrion-system
+  labels:
+    app: postgresql
+spec:
+  type: ClusterIP
+  ports:
+    - port: 5432
+      targetPort: 5432
+      protocol: TCP
+      name: postgres
+  selector:
+    app: postgresql
+
+---
+# PostgreSQL Init ConfigMap (optional - creates tables on first run)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgresql-init
+  namespace: zentrion-system
+  labels:
+    app: postgresql
+data:
+  init.sql: |
+    -- Zentrion database initialization
+    
+    -- Enable UUID extension
+    CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+    
+    -- Telemetry logs table
+    CREATE TABLE IF NOT EXISTS telemetry_logs (
+      id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+      timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      source VARCHAR(255) NOT NULL,
+      source_ip INET NOT NULL,
+      method VARCHAR(10) NOT NULL,
+      path TEXT NOT NULL,
+      status INTEGER NOT NULL,
+      latency_ms INTEGER NOT NULL,
+      service VARCHAR(255) NOT NULL,
+      dest_service VARCHAR(255),
+      user_agent TEXT,
+      request_size INTEGER,
+      response_size INTEGER,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    
+    CREATE INDEX idx_telemetry_service ON telemetry_logs(service);
+    CREATE INDEX idx_telemetry_timestamp ON telemetry_logs(timestamp DESC);
+    CREATE INDEX idx_telemetry_status ON telemetry_logs(status);
+    
+    -- Anomalies table
+    CREATE TABLE IF NOT EXISTS anomalies (
+      id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+      anomaly_id VARCHAR(255) UNIQUE NOT NULL,
+      timestamp TIMESTAMPTZ NOT NULL,
+      service VARCHAR(255) NOT NULL,
+      type VARCHAR(100) NOT NULL,
+      severity VARCHAR(20) NOT NULL,
+      details TEXT NOT NULL,
+      associated_logs TEXT[],
+      suggested_policy_draft_id UUID,
+      metadata JSONB,
+      resolved BOOLEAN DEFAULT FALSE,
+      resolved_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    
+    CREATE INDEX idx_anomalies_service ON anomalies(service);
+    CREATE INDEX idx_anomalies_type ON anomalies(type);
+    CREATE INDEX idx_anomalies_severity ON anomalies(severity);
+    CREATE INDEX idx_anomalies_timestamp ON anomalies(timestamp DESC);
+    
+    -- Policy drafts table
+    CREATE TABLE IF NOT EXISTS policy_drafts (
+      id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+      draft_id VARCHAR(255) UNIQUE NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      created_by VARCHAR(255) NOT NULL,
+      service VARCHAR(255) NOT NULL,
+      namespace VARCHAR(255) NOT NULL DEFAULT 'default',
+      yaml_content TEXT NOT NULL,
+      status VARCHAR(50) NOT NULL DEFAULT 'pending',
+      reason TEXT NOT NULL,
+      applied_at TIMESTAMPTZ,
+      approved_by VARCHAR(255),
+      rejected_by VARCHAR(255),
+      rejection_reason TEXT,
+      anomaly_id VARCHAR(255)
+    );
+    
+    CREATE INDEX idx_policy_drafts_status ON policy_drafts(status);
+    CREATE INDEX idx_policy_drafts_service ON policy_drafts(service);
+    CREATE INDEX idx_policy_drafts_created_at ON policy_drafts(created_at DESC);
+    
+    -- Policy history table
+    CREATE TABLE IF NOT EXISTS policy_history (
+      id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+      policy_id VARCHAR(255) NOT NULL,
+      action VARCHAR(50) NOT NULL,
+      timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      user_id VARCHAR(255) NOT NULL,
+      details TEXT NOT NULL,
+      metadata JSONB
+    );
+    
+    CREATE INDEX idx_policy_history_policy_id ON policy_history(policy_id);
+    CREATE INDEX idx_policy_history_timestamp ON policy_history(timestamp DESC);
+    
+    -- Services table (discovered services)
+    CREATE TABLE IF NOT EXISTS services (
+      id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+      name VARCHAR(255) UNIQUE NOT NULL,
+      namespace VARCHAR(255) NOT NULL,
+      labels JSONB,
+      dependencies TEXT[],
+      first_seen TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      last_seen TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    
+    CREATE INDEX idx_services_name ON services(name);
+    CREATE INDEX idx_services_namespace ON services(namespace);
+    
+    -- Users table
+    CREATE TABLE IF NOT EXISTS users (
+      id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+      username VARCHAR(255) UNIQUE NOT NULL,
+      password_hash VARCHAR(255) NOT NULL,
+      role VARCHAR(50) NOT NULL,
+      email VARCHAR(255),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    
+    CREATE INDEX idx_users_username ON users(username);
