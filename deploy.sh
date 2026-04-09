@@ -75,7 +75,7 @@ echo ""
 echo "🐳 Step 5: Building Docker image..."
 eval $(minikube docker-env)
 
-cd apps/orchestrator-api
+cd app/orchestrator-api
 docker build -t zentrion/orchestrator-api:latest . || {
     echo -e "${RED}❌ Docker build failed${NC}"
     exit 1
