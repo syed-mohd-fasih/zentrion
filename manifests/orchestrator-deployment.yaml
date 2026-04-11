@@ -73,6 +73,16 @@ spec:
                 configMapKeyRef:
                   name: orchestrator-config
                   key: DB_NAME
+            - name: DB_USER
+              valueFrom:
+                configMapKeyRef:
+                  name: orchestrator-config
+                  key: DB_USER
+            - name: DB_SYNC
+              valueFrom:
+                configMapKeyRef:
+                  name: orchestrator-config
+                  key: DB_SYNC
             - name: K8S_IN_CLUSTER
               valueFrom:
                 configMapKeyRef:
