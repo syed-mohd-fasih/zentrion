@@ -18,6 +18,7 @@ data:
   DB_PORT: "5432"
   DB_NAME: "zentrion"
   DB_USER: "zentrion"
+  DB_SYNC: "true"
   
   # Telemetry config (real telemetry from Istio)
   TELEMETRY_SOURCE: "istio"
