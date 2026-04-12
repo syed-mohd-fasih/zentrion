@@ -7,7 +7,7 @@ This guide outlines all code changes needed to migrate from the mock version to 
 ## 📦 **New Dependencies to Install**
 
 ```bash
-pnpm add @kubernetes/client-node @nestjs/typeorm typeorm pg @nestjs/event-emitter
+npm install @kubernetes/client-node @nestjs/typeorm typeorm pg @nestjs/event-emitter
 ```
 
 **Package explanations:**

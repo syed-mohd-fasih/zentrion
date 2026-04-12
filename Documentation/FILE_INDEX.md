@@ -168,15 +168,18 @@ bcrypt
 
 ---
 
-## 🚀 **What's Left (Phase 3: Deployment)**
+## ✅ **Deployment Status**
 
-1. ☐ Setup minikube cluster + Istio (see ENVIRONMENT_SETUP.md)
-2. ☐ Apply CRDs: `kubectl apply -f manifests/crds/`
-3. ☐ Apply RBAC: `kubectl apply -f manifests/rbac.yaml`
-4. ☐ Deploy PostgreSQL: `kubectl apply -f manifests/postgresql.yaml`
-5. ☐ Build Docker image and push to minikube
-6. ☐ Deploy Zentrion: `kubectl apply -f manifests/` or `./deploy.sh`
-7. ☐ Deploy sample app (Bookinfo) and generate traffic
-8. ☐ Connect Next.js dashboard
+Phase 3 (Deployment) is **complete**. All backend services are deployed and verified.
 
-See DEPLOYMENT.md or run `./deploy.sh` for automated deployment.
+1. ☑ Setup minikube cluster + Istio
+2. ☑ Apply CRDs: `kubectl apply -f manifests/crds/`
+3. ☑ Apply RBAC: `kubectl apply -f manifests/rbac.yaml`
+4. ☑ Deploy PostgreSQL: `kubectl apply -f manifests/postgresql.yaml`
+5. ☑ Build Docker image and push to minikube
+6. ☑ Deploy Zentrion: `./deploy.sh`
+7. ☑ Deploy Bookinfo sample app and verify telemetry
+8. ☑ Test all 22 API endpoints
+9. ☐ Connect Next.js dashboard — **next phase**
+
+See `DEMO.md` for a step-by-step demo walkthrough.

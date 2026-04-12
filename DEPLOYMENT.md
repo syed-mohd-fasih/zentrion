@@ -97,7 +97,7 @@ kubectl get pvc -n zentrion-system
 **Expected output:**
 ```
 NAME                          READY   STATUS    RESTARTS   AGE
-postgresql-xxx                1/1     Running   0          30s
+postgresql-xxx                2/2     Running   0          30s
 ```
 
 ---
@@ -111,7 +111,7 @@ postgresql-xxx                1/1     Running   0          30s
 eval $(minikube docker-env)
 
 # Build image
-cd apps/orchestrator-api
+cd app/orchestrator-api
 docker build -t zentrion/orchestrator-api:latest .
 
 # Verify
@@ -218,8 +218,8 @@ kubectl get pods -n zentrion-system
 **Should see:**
 ```
 NAME                                    READY   STATUS    RESTARTS   AGE
-postgresql-xxx                          1/1     Running   0          5m
-zentrion-orchestrator-xxx               1/1     Running   0          2m
+postgresql-xxx                          2/2     Running   0          5m
+zentrion-orchestrator-xxx               2/2     Running   0          2m
 ```
 
 ---
@@ -382,7 +382,7 @@ data:
 
 Restart orchestrator:
 ```bash
-kubectl rollout restart deployment/zentrion-orchestrator -n zentriion-system
+kubectl rollout restart deployment/zentrion-orchestrator -n zentrion-system
 ```
 
 ---

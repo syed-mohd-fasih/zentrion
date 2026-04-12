@@ -63,8 +63,7 @@ git clone <your-repo>
 cd zentrion
 
 # Install backend dependencies
-cd apps/orchestrator-api
-pnpm install
+cd app/orchestrator-api
 
 # Copy all new files from artifacts (see file list below)
 
@@ -166,9 +165,9 @@ Zentrion is now:
 
 ```bash
 cd apps/dashboard
-pnpm install
+npm install
 echo "NEXT_PUBLIC_API_URL=http://localhost:3001" > .env.local
-pnpm dev
+npm run dev
 ```
 
 Open http://localhost:3000 and login with `admin/admin123`

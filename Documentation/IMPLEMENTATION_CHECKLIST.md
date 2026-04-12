@@ -135,7 +135,7 @@ See `Documentation/FILE_INDEX.md` for complete file status.
 
 ---
 
-## 🚀 **Phase 3: Kubernetes Deployment**
+## ✅ **Phase 3: Kubernetes Deployment — COMPLETE**
 
 ### ☐ Create Zentrion Namespace
 
@@ -347,13 +347,13 @@ istioctl dashboard kiali
 cd app/dashboard
 
 # Install dependencies
-pnpm install
+npm install
 
 # Create .env.local
 echo "NEXT_PUBLIC_API_URL=http://localhost:3001" > .env.local
 
 # Start development server
-pnpm dev
+npm run dev
 ```
 
 ### ☐ Test Dashboard Features
