@@ -25,6 +25,11 @@ rules:
   - apiGroups: [""]
     resources: ["pods", "services", "endpoints", "namespaces"]
     verbs: ["get", "list", "watch"]
+
+  # Read pod logs (for Istio Envoy sidecar telemetry)
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
   
   # Manage Istio security policies
   - apiGroups: ["security.istio.io"]
