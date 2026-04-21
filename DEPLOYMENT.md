@@ -31,6 +31,9 @@ This script will:
 5. Deploy Orchestrator
 6. Wait for all pods to be ready
 7. Port-forward to localhost
+8. Install dashboard dependencies and start the Next.js dev server on port 3000
+
+**Requirements:** `node` ≥ 20 and `npm` must be on your PATH before running the script.
 
 ---
 
@@ -192,6 +195,43 @@ curl -X POST http://localhost:3001/auth/login \
 
 ---
 
+## 🖥️ **Step 8: Run the Dashboard (Next.js)**
+
+After the orchestrator is running and port-forwarded:
+
+```bash
+# 1. Set the API URL (copy the example env file)
+cd app/dashboard
+cp .env.local.example .env.local
+
+# 2. Install dependencies (first time only)
+npm install
+
+# 3. Start the dev server
+npm run dev
+```
+
+The dashboard will be available at **http://localhost:3000**.
+
+### Default Credentials
+
+| Username | Password   | Role    | Can approve policies? |
+|----------|------------|---------|----------------------|
+| admin    | admin123   | ADMIN   | Yes                  |
+| analyst  | analyst123 | ANALYST | No (can reject)      |
+| viewer   | viewer123  | VIEWER  | No                   |
+
+### What the Dashboard Provides
+
+- **Overview** — Live telemetry stream, service count, error rate tiles
+- **Policy Review** — Three-stage workflow: incoming drafts → summary → YAML diff → approve/reject
+- **Services** — Per-service health, attached policies, telemetry logs
+- **Anomalies** — Real-time anomaly list with detail view and policy generation
+- **Audit Log** — Full policy lifecycle history with filters
+- **Settings / Access Control** — Stubs (coming in a future release)
+
+---
+
 ### Expose via LoadBalancer (Optional)
 
 For cloud environments:
@@ -311,6 +351,17 @@ curl -H "Authorization: Bearer $TOKEN" http://localhost:3001/telemetry/services 
 # Get anomalies
 curl -H "Authorization: Bearer $TOKEN" http://localhost:3001/anomalies | jq
 ```
+
+---
+
+### 8. Dashboard is Reachable
+
+```bash
+curl -s -o /dev/null -w "%{http_code}" http://localhost:3000
+# Expected: 200
+```
+
+Open http://localhost:3000 in a browser. You should see the login page. Log in as `admin/admin123` and verify you reach the dashboard overview.
 
 ---
 
@@ -515,61 +566,108 @@ Then follow ENVIRONMENT_SETUP.md to start fresh.
 
 ## 📚 **Next Steps**
 
-1. **Connect Dashboard** - Deploy your Next.js frontend
-2. **Generate Traffic** - Test anomaly detection
-3. **Create Policies** - Use the dashboard to approve policies
-4. **View in Kiali** - See policies applied in the mesh
+1. **Generate Traffic** - Send requests to Bookinfo to populate telemetry
+2. **Trigger an Anomaly** - Hit a non-existent endpoint repeatedly to trigger detection
+3. **Create a Policy** - Use "Generate Policy" in the anomaly detail page
+4. **Approve the Policy** - Walk through Policy Review → approve as admin
+5. **View in Kiali** - See the AuthorizationPolicy applied in the mesh: `istioctl dashboard kiali`
 
 ---
 
 ## 🎓 **Demo Script for FYP**
 
-### 1. Show Running System
+### Before you start
 
 ```bash
-kubectl get pods -n zentrion-system
-kubectl get pods -n default  # Bookinfo app
+# Export Bookinfo gateway URL
+export GATEWAY_URL=$(minikube ip):$(kubectl -n istio-system get service istio-ingressgateway \
+  -o jsonpath='{.spec.ports[?(@.name=="http2")].nodePort}')
+
+# Ensure both services are up
+kubectl get pods -n zentrion-system    # orchestrator + postgresql
+kubectl get pods -n default            # Bookinfo app
 ```
 
-### 2. Generate Normal Traffic
+Open **http://localhost:3000** and log in as `admin / admin123`.
+
+---
+
+### 1. Show Running System (30 seconds)
+
+Point to the dashboard **Overview** page:
+- Live Logs Seen counter is 0 (no traffic yet)
+- Active Services shows real cluster count
+
+---
+
+### 2. Generate Normal Traffic (1 minute)
 
 ```bash
-for i in {1..20}; do curl -s "http://$GATEWAY_URL/productpage" > /dev/null; done
+for i in {1..20}; do
+  curl -s "http://$GATEWAY_URL/productpage" > /dev/null
+  echo "Request $i sent"
+  sleep 1
+done
 ```
 
-**Show in dashboard:** Normal telemetry, no anomalies
+**Show in dashboard:**
+- Overview → Live Telemetry panel starts streaming log entries in real time
+- Services page shows productpage/details/reviews/ratings with live RPS
 
-### 3. Simulate Attack
+---
+
+### 3. Simulate an Attack (30 seconds)
 
 ```bash
-# Simulate DoS
-for i in {1..100}; do curl -s "http://$GATEWAY_URL/productpage" > /dev/null & done
-
-# Or simulate suspicious IP (modify productpage pod)
+# Rapid requests to a non-existent endpoint (triggers anomaly detection)
+for i in {1..50}; do
+  curl -s "http://$GATEWAY_URL/api/admin/secret" > /dev/null &
+done
+wait
 ```
 
-**Show in dashboard:** Anomaly detected! 🚨
+**Show in dashboard:**
+- Anomalies page — new anomaly appears live (WebSocket push, no refresh needed)
+- 4xx/5xx tile on Overview increments
 
-### 4. Generate Policy
+---
 
-**In dashboard:** Click "Generate Policy from Anomaly"
+### 4. Generate Policy from Anomaly (1 minute)
 
-**Show policy draft YAML**
+**In dashboard:**
+1. Click the anomaly → opens detail page
+2. Click **"Generate Policy Suggestion"** (ADMIN/ANALYST role)
+3. Toast confirms draft created
 
-### 5. Apply Policy
+---
 
-**In dashboard:** Click "Approve & Apply"
+### 5. Review & Approve Policy (1 minute)
 
-**Show in Kiali:** Policy is now visible in the mesh!
+**In dashboard → Policy Review:**
+1. **Stage 1 — Incoming:** New draft appears; click to select it
+2. **Stage 2 — Summary:** Shows service, namespace, reason, linked anomaly
+3. **Stage 3 — Review:** YAML diff (before = current policy, after = generated YAML)
+4. Click **"Approve & Apply"** — toast confirms applied
 
-### 6. Verify Policy Works
+---
+
+### 6. Verify in Cluster and Kiali (30 seconds)
 
 ```bash
-# The suspicious pattern should now be blocked
-# Check Kiali for policy enforcement metrics
+# Policy is now in the cluster
+kubectl get authorizationpolicies -A | grep zentrion
+
+# Open Kiali
+istioctl dashboard kiali
 ```
 
-**Ta-da! 🎉 Live Zero Trust Architecture in action!**
+Navigate to **Istio Config → Authorization Policies** — the new policy appears labeled `zentrion.io/generated: true`.
+
+**Show in dashboard → Audit Log:** Created → Approved → Applied events in the timeline.
+
+---
+
+That's it! Live Zero Trust policy enforcement, generated and applied in under 5 minutes.
 
 ---
 
