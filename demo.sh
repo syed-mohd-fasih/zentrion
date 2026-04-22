@@ -1,28 +1,27 @@
 #!/usr/bin/env bash
 # =============================================================================
-#  Zentrion — Live Demo Script
+#  Zentrion — Attack Simulation & Frontend Test Seeder
+#
+#  Injects adversarial traffic into the mesh, waits for anomaly detection,
+#  then seeds the system with policy drafts in varied states so every page
+#  of the frontend can be fully exercised.
+#
 #  Usage:
-#    ./demo.sh           # auto-advance (2s between sections — good for screenshots)
-#    ./demo.sh --pause   # press ENTER between sections (good for live demo)
+#    ./demo.sh              # run simulation (default)
+#    ./demo.sh --verbose    # print all raw API responses
 # =============================================================================
 
 set -euo pipefail
 
 API="http://localhost:3001"
 NAMESPACE="zentrion-system"
-PAUSE_MODE=false
-TOKEN=""
-ANOMALY_ID=""
-DRAFT_ID=""
-ATTACK_PID=""
-ATTACK_LAUNCHED=false
+VERBOSE=false
 
-# ── parse flags ──────────────────────────────────────────────────────────────
 for arg in "$@"; do
-  [[ "$arg" == "--pause" ]] && PAUSE_MODE=true
+  [[ "$arg" == "--verbose" ]] && VERBOSE=true
 done
 
-# ── colors ───────────────────────────────────────────────────────────────────
+# ── colors ────────────────────────────────────────────────────────────────────
 BOLD='\033[1m'
 CYAN='\033[1;36m'
 GREEN='\033[1;32m'
@@ -31,415 +30,286 @@ RED='\033[1;31m'
 DIM='\033[2m'
 RESET='\033[0m'
 
-# ── helpers ──────────────────────────────────────────────────────────────────
-banner() {
-  local num="$1" title="$2"
-  echo ""
-  echo -e "${CYAN}${BOLD}╔═════════════════════════════════════════════════════════════════════╗${RESET}"
-  printf "${CYAN}${BOLD}   SECTION %-2s  %-44s   ${RESET}\n" "$num" "$title"
-  echo -e "${CYAN}${BOLD}╚═════════════════════════════════════════════════════════════════════╝${RESET}"
-  echo ""
-}
-
-cmd_header() {
-  echo -e "${DIM}  \$ $*${RESET}"
-}
-
 ok()   { echo -e "${GREEN}  ✔  $*${RESET}"; }
 warn() { echo -e "${YELLOW}  ⚠  $*${RESET}"; }
 err()  { echo -e "${RED}  ✘  $*${RESET}"; }
+step() { echo -e "\n${BOLD}  ▶  $*${RESET}"; }
 
-advance() {
-  echo ""
-  if $PAUSE_MODE; then
-    echo -e "${DIM}  ── Press ENTER to continue ──${RESET}"
-    read -r
-  else
-    sleep 2
-  fi
-}
+show() { $VERBOSE && { echo "$1" | jq . 2>/dev/null || echo "$1"; }; true; }
 
 countdown() {
   local seconds="$1" label="$2"
   for i in $(seq "$seconds" -1 1); do
-    printf "\r  ${YELLOW}%s — %2ds remaining ...${RESET}" "$label" "$i"
+    printf "\r  ${YELLOW}%s — %2ds remaining...${RESET}" "$label" "$i"
     sleep 1
   done
-  printf "\r%-60s\n" ""   # clear the line
+  printf "\r%-70s\n" ""
 }
 
-api_get() {
-  local path="$1"
-  cmd_header "curl -s ${API}${path}"
-  curl -s "${API}${path}" -H "Authorization: Bearer ${TOKEN}" | jq .
-}
-
-api_post_auth() {
-  local path="$1" body="$2"
-  cmd_header "curl -s -X POST ${API}${path}"
-  curl -s -X POST "${API}${path}" \
-    -H "Content-Type: application/json" \
-    -H "Authorization: Bearer ${TOKEN}" \
-    -d "$body" | jq .
-}
-
-# ── attack simulation ─────────────────────────────────────────────────────────
-# Runs inside the productpage pod (Python stdlib only — no curl needed).
-# Targets the details service to trigger 4 detectors simultaneously:
-#   TRAFFIC_SPIKE         — 35 requests in ~5s (baseline near 0 → way above 3× threshold)
-#   SUSPICIOUS_PATTERN    — 45 requests from same pod IP (threshold: >30)
-#   UNEXPECTED_COMMUNICATION — productpage→details not in whitelist
-#   HIGH_ERROR_RATE       — 8/10 requests return 4xx (threshold: >20% on ≥10 samples)
-launch_attack() {
-  local pod
-  pod=$(kubectl get pods -n default -l app=productpage \
-    --field-selector=status.phase=Running \
-    -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
-
-  if [[ -z "$pod" ]]; then
-    warn "productpage pod not found — skipping live attack simulation"
-    warn "Deploy Bookinfo first: kubectl apply -f https://raw.githubusercontent.com/istio/istio/release-1.20/samples/bookinfo/platform/kube/bookinfo.yaml"
-    return 1
-  fi
-
-  ok "Attack pod: ${pod}"
-  echo -e "${YELLOW}  Injecting anomalous traffic into the mesh (background)...${RESET}"
-
-  # Run in background; errors are silenced so they don't kill the script
-  kubectl exec -n default "$pod" -- python3 -c "
-import urllib.request, time
-
-base = 'http://details:9080'
-
-# Phase 1 — Traffic spike + Suspicious pattern
-# 35 rapid requests from same source IP triggers:
-#   TRAFFIC_SPIKE      (>20 requests in 10s, baseline ~0 → >3x threshold)
-#   SUSPICIOUS_PATTERN (>30 requests from same IP in 5-min window)
-#   UNEXPECTED_COMMUNICATION (productpage→details not in known-comms whitelist)
-for i in range(35):
-    try:
-        urllib.request.urlopen(base + '/details/0', timeout=2)
-    except Exception:
-        pass
-
-# Phase 2 — High error rate
-# 8 requests to an invalid path, 2 valid = 80% error rate on 10 samples
-# Triggers: HIGH_ERROR_RATE (>20% errors with min 10 samples)
-for i in range(8):
-    try:
-        urllib.request.urlopen(base + '/invalid-endpoint-attack', timeout=2)
-    except Exception:
-        pass
-for i in range(2):
-    try:
-        urllib.request.urlopen(base + '/details/0', timeout=2)
-    except Exception:
-        pass
-" 2>/dev/null &
-
-  ATTACK_PID=$!
-  ATTACK_LAUNCHED=true
-}
-
-# ── pre-flight checks ─────────────────────────────────────────────────────────
+# ── header ────────────────────────────────────────────────────────────────────
 echo ""
-echo -e "${BOLD}╔══════════════════════════════════════════════════════════════╗${RESET}"
-echo -e "${BOLD}║           ZENTRION  —  Zero Trust Security Orchestrator      ║${RESET}"
-echo -e "${BOLD}║                       FYP Live Demo                          ║${RESET}"
-echo -e "${BOLD}╚══════════════════════════════════════════════════════════════╝${RESET}"
-echo ""
-echo -e "  Mode: $(if $PAUSE_MODE; then echo 'Manual (press ENTER to advance)'; else echo 'Auto (2s between sections)'; fi)"
+echo -e "${CYAN}${BOLD}╔═══════════════════════════════════════════════════════════╗${RESET}"
+echo -e "${CYAN}${BOLD}║      Zentrion — Attack Simulation & Frontend Seeder       ║${RESET}"
+echo -e "${CYAN}${BOLD}╚═══════════════════════════════════════════════════════════╝${RESET}"
 echo ""
 
+# ── pre-flight ────────────────────────────────────────────────────────────────
 for tool in kubectl curl jq; do
-  if ! command -v "$tool" &>/dev/null; then
-    err "Required tool not found: $tool"
-    exit 1
-  fi
+  command -v "$tool" &>/dev/null || { err "Required tool not found: $tool"; exit 1; }
 done
-ok "Dependencies OK (kubectl, curl, jq)"
 
 if ! curl -s --max-time 3 "${API}/health" &>/dev/null; then
   err "Cannot reach orchestrator at ${API}"
-  echo ""
-  echo -e "  Run this in a separate terminal, then retry:"
-  echo -e "  ${YELLOW}kubectl port-forward svc/zentrion-orchestrator -n ${NAMESPACE} 3001:3001${RESET}"
-  echo ""
+  echo -e "  Run: ${YELLOW}kubectl port-forward svc/zentrion-orchestrator -n ${NAMESPACE} 3001:3001${RESET}"
   exit 1
 fi
 ok "Orchestrator reachable at ${API}"
 
-advance
+# ── authenticate (admin + analyst) ───────────────────────────────────────────
+step "Authenticating..."
 
-# =============================================================================
-# SECTION 1 — Cluster State
-# =============================================================================
-banner 1 "Cluster State"
-
-echo -e "${BOLD}  Pods in zentrion-system:${RESET}"
-cmd_header "kubectl get pods -n ${NAMESPACE}"
-kubectl get pods -n "${NAMESPACE}"
-
-echo ""
-echo -e "${BOLD}  Zentrion Custom Resource Definitions:${RESET}"
-cmd_header "kubectl get crd | grep zentrion"
-kubectl get crd | grep zentrion || warn "No Zentrion CRDs found — run ./deploy.sh first"
-
-echo ""
-echo -e "${BOLD}  RBAC — ClusterRoleBinding:${RESET}"
-cmd_header "kubectl get clusterrolebinding | grep zentrion"
-kubectl get clusterrolebinding | grep zentrion || warn "No Zentrion RBAC found"
-
-echo ""
-echo -e "${BOLD}  Existing Istio Authorization Policies (before demo):${RESET}"
-cmd_header "kubectl get authorizationpolicies -A"
-kubectl get authorizationpolicies -A 2>/dev/null || warn "No AuthorizationPolicies yet — expected at start"
-
-advance
-
-# =============================================================================
-# SECTION 2 — Health Check
-# =============================================================================
-banner 2 "API Health Check"
-
-echo -e "${BOLD}  GET /health${RESET}"
-HEALTH=$(curl -s "${API}/health")
-echo "$HEALTH" | jq .
-
-STATUS=$(echo "$HEALTH" | jq -r '.status // "unknown"')
-if [[ "$STATUS" == "ok" ]]; then
-  ok "Orchestrator is healthy"
-else
-  warn "Unexpected health status: $STATUS"
-fi
-
-advance
-
-# =============================================================================
-# SECTION 3 — Authentication
-# =============================================================================
-banner 3 "Authentication (JWT Login)"
-
-echo -e "${BOLD}  Logging in as admin...${RESET}"
-LOGIN_RESP=$(curl -s -X POST "${API}/auth/login" \
+ADMIN_LOGIN=$(curl -s -X POST "${API}/auth/login" \
   -H "Content-Type: application/json" \
   -d '{"username":"admin","password":"admin123"}')
-echo "$LOGIN_RESP" | jq .
+show "$ADMIN_LOGIN"
+ADMIN_TOKEN=$(echo "$ADMIN_LOGIN" | jq -r '.accessToken // empty')
+[[ -z "$ADMIN_TOKEN" ]] && { err "Admin login failed — check credentials"; exit 1; }
+ok "admin authenticated"
 
-TOKEN=$(echo "$LOGIN_RESP" | jq -r '.accessToken // empty')
-if [[ -z "$TOKEN" ]]; then
-  err "Login failed — cannot continue without a token"
-  exit 1
-fi
-ok "Token received (${TOKEN:0:30}...)"
+ANALYST_LOGIN=$(curl -s -X POST "${API}/auth/login" \
+  -H "Content-Type: application/json" \
+  -d '{"username":"analyst","password":"analyst123"}')
+show "$ANALYST_LOGIN"
+ANALYST_TOKEN=$(echo "$ANALYST_LOGIN" | jq -r '.accessToken // empty')
+[[ -z "$ANALYST_TOKEN" ]] && warn "Analyst login failed — rejection step will be skipped"
+[[ -n "$ANALYST_TOKEN" ]] && ok "analyst authenticated"
 
-echo ""
-echo -e "${BOLD}  Verifying identity — GET /auth/me${RESET}"
-api_get "/auth/me"
+auth()     { echo "Authorization: Bearer ${ADMIN_TOKEN}"; }
+auth_analyst() { echo "Authorization: Bearer ${ANALYST_TOKEN}"; }
 
-advance
+# ── live attack simulation ────────────────────────────────────────────────────
+step "Launching live attack simulation..."
 
-# =============================================================================
-# SECTION 4 — Service Discovery
-# =============================================================================
-banner 4 "Service Discovery"
+ATTACK_PID=""
+ATTACK_LAUNCHED=false
 
-echo -e "${BOLD}  Discovered services in the mesh — GET /telemetry/services${RESET}"
-cmd_header "curl -s ${API}/telemetry/services"
-SERVICES=$(curl -s "${API}/telemetry/services" -H "Authorization: Bearer ${TOKEN}")
-echo "$SERVICES" | jq .
+POD=$(kubectl get pods -n default -l app=productpage \
+  --field-selector=status.phase=Running \
+  -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
 
-SVC_COUNT=$(echo "$SERVICES" | jq '.services | length // 0')
-ok "Found ${SVC_COUNT} service(s)"
-
-advance
-
-# =============================================================================
-# SECTION 5 — Live Telemetry
-# =============================================================================
-banner 5 "Live Istio Telemetry"
-
-echo -e "${BOLD}  Last 5 Envoy access log entries — GET /telemetry/live?limit=5${RESET}"
-api_get "/telemetry/live?limit=5"
-
-# ── Launch attack simulation NOW, in background ───────────────────────────────
-# Started here so the 45-request simulation completes while we wait below,
-# and the anomaly detector (runs every 5s) has time to catch it before Section 6.
-echo ""
-echo -e "${BOLD}  ──────────────────────────────────────────────────────────${RESET}"
-echo -e "${BOLD}  Simulating adversarial traffic to trigger anomaly detection${RESET}"
-echo -e "${BOLD}  ──────────────────────────────────────────────────────────${RESET}"
-echo ""
-echo -e "  Target detectors:"
-echo -e "  ${YELLOW}•${RESET} TRAFFIC_SPIKE         — 35 rapid requests (baseline ~0 → far above 3× threshold)"
-echo -e "  ${YELLOW}•${RESET} SUSPICIOUS_PATTERN    — 45 requests from same source IP (threshold: >30)"
-echo -e "  ${YELLOW}•${RESET} UNEXPECTED_COMM.      — productpage → details (not in known-comms whitelist)"
-echo -e "  ${YELLOW}•${RESET} HIGH_ERROR_RATE        — 8/10 requests return 4xx (threshold: >20%)"
-echo ""
-launch_attack || true
-
-if $ATTACK_LAUNCHED; then
+if [[ -n "$POD" ]]; then
+  ok "Bookinfo productpage pod: ${POD}"
+  echo -e "  ${YELLOW}Injecting anomalous traffic (4 attack patterns)...${RESET}"
+  echo -e "  ${DIM}• TRAFFIC_SPIKE         — 35 rapid requests (baseline ~0, far above 3× threshold)${RESET}"
+  echo -e "  ${DIM}• SUSPICIOUS_PATTERN    — 35 requests from same source IP (threshold >30)${RESET}"
+  echo -e "  ${DIM}• UNEXPECTED_COMM.      — productpage→details (not in known-comms whitelist)${RESET}"
+  echo -e "  ${DIM}• HIGH_ERROR_RATE       — 8/10 requests to invalid path (threshold >20%)${RESET}"
   echo ""
-  # Wait for: simulation to finish (~10s) + Istio log streaming + 3 detector cycles (15s)
-  countdown 25 "Waiting for Envoy logs → telemetry DB → anomaly detector"
-  ok "Detection window elapsed — querying anomalies now"
+
+  kubectl exec -n default "$POD" -- python3 -c "
+import urllib.request
+base = 'http://details:9080'
+# TRAFFIC_SPIKE + SUSPICIOUS_PATTERN + UNEXPECTED_COMMUNICATION
+for i in range(35):
+    try: urllib.request.urlopen(base + '/details/0', timeout=2)
+    except: pass
+# HIGH_ERROR_RATE (8 bad + 2 good = 80% error rate on 10 samples)
+for i in range(8):
+    try: urllib.request.urlopen(base + '/invalid-endpoint-attack', timeout=2)
+    except: pass
+for i in range(2):
+    try: urllib.request.urlopen(base + '/details/0', timeout=2)
+    except: pass
+" 2>/dev/null &
+
+  ATTACK_PID=$!
+  ATTACK_LAUNCHED=true
+  ok "Attack injected in background (PID: ${ATTACK_PID})"
+  countdown 30 "Waiting for Envoy logs → telemetry DB → anomaly detector"
 else
-  warn "Attack simulation skipped — Section 6 will use any existing anomalies or fallback to manual draft"
-  advance
+  warn "Bookinfo not found in 'default' namespace — skipping live traffic injection"
+  warn "To enable: kubectl apply -f https://raw.githubusercontent.com/istio/istio/release-1.20/samples/bookinfo/platform/kube/bookinfo.yaml"
+  echo ""
 fi
 
-# =============================================================================
-# SECTION 6 — Anomaly Detection
-# =============================================================================
-banner 6 "Anomaly Detection Results"
+# ── collect live anomalies ────────────────────────────────────────────────────
+step "Collecting detected anomalies..."
 
-echo -e "${BOLD}  Detected anomalies — GET /anomalies?limit=5${RESET}"
-ANOMALIES=$(curl -s "${API}/anomalies?limit=5" \
-  -H "Authorization: Bearer ${TOKEN}")
-echo "$ANOMALIES" | jq .
-
-ANOMALY_COUNT=$(echo "$ANOMALIES" | jq '.anomalies | length // 0')
+ANOMALIES_RESP=$(curl -s "${API}/anomalies?limit=10" -H "$(auth)")
+show "$ANOMALIES_RESP"
+ANOMALY_COUNT=$(echo "$ANOMALIES_RESP" | jq '.anomalies | length // 0')
 ok "Found ${ANOMALY_COUNT} anomaly(ies)"
 
-ANOMALY_ID=$(echo "$ANOMALIES" | jq -r '.anomalies[0].anomalyId // empty')
-if [[ -n "$ANOMALY_ID" ]]; then
-  ok "Using anomaly ID: ${ANOMALY_ID} for policy generation"
-  echo ""
-  echo -e "${BOLD}  Anomaly detail — GET /anomalies/${ANOMALY_ID}${RESET}"
-  api_get "/anomalies/${ANOMALY_ID}"
-else
-  warn "No anomalies found — policy workflow will use manual draft creation"
-fi
+# ── generate policy drafts from anomalies ─────────────────────────────────────
+step "Generating policy drafts from detected anomalies..."
 
-advance
+ANOMALY_DRAFT_IDS=()
+for i in 0 1 2; do
+  ANOM_ID=$(echo "$ANOMALIES_RESP" | jq -r ".anomalies[${i}].anomalyId // empty")
+  [[ -z "$ANOM_ID" ]] && continue
 
-# =============================================================================
-# SECTION 7 — Policy Workflow
-# =============================================================================
-banner 7 "Policy Workflow  (Detect → Draft → Approve → Apply)"
-
-# Derive target service from the anomaly (strips pod-hash suffix if present).
-# Falls back to "details" if no anomaly was detected.
-ANOMALY_SERVICE=$(echo "$ANOMALIES" | jq -r '.anomalies[0].service // "details"' \
-  | sed 's/-[a-f0-9]\{7,10\}-[a-z0-9]\{5\}$//')
-ANOMALY_TYPE=$(echo "$ANOMALIES" | jq -r '.anomalies[0].type // "UNKNOWN"')
-
-echo -e "${BOLD}  Step 1: Create policy draft targeting the anomalous service${RESET}"
-echo -e "  Anomaly type  : ${YELLOW}${ANOMALY_TYPE}${RESET}"
-echo -e "  Target service: ${YELLOW}${ANOMALY_SERVICE}${RESET}"
-echo ""
-cmd_header "POST /policies/drafts"
-DRAFT_RESP=$(curl -s -X POST "${API}/policies/drafts" \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer ${TOKEN}" \
-  -d "{
-    \"service\": \"${ANOMALY_SERVICE}\",
-    \"namespace\": \"default\",
-    \"rules\": [
-      {
-        \"from\": {\"source\": {\"namespaces\": [\"default\"]}},
-        \"to\": {\"operation\": {\"methods\": [\"GET\"]}}
-      }
-    ],
-    \"reason\": \"Restrict ${ANOMALY_SERVICE} to GET from default namespace — responding to ${ANOMALY_TYPE} anomaly\",
-    \"anomalyId\": \"${ANOMALY_ID}\"
-  }")
-echo "$DRAFT_RESP" | jq .
-DRAFT_ID=$(echo "$DRAFT_RESP" | jq -r '.draft.draftId // empty')
-
-if [[ -z "$DRAFT_ID" ]]; then
-  warn "Draft creation failed — skipping approval steps"
-  advance
-else
-  ok "Draft created — ID: ${DRAFT_ID}"
-
-  echo ""
-  echo -e "${BOLD}  Step 2: Human review queue — policies awaiting approval${RESET}"
-  api_get "/policies/drafts/pending"
-
-  advance
-
-  echo -e "${BOLD}  Step 3: Admin approves and applies the policy to the cluster${RESET}"
-  cmd_header "POST /policies/drafts/${DRAFT_ID}/approve"
-  APPROVE_RESP=$(curl -s -X POST "${API}/policies/drafts/${DRAFT_ID}/approve" \
+  RESP=$(curl -s -X POST "${API}/policies/drafts/from-anomaly" \
     -H "Content-Type: application/json" \
-    -H "Authorization: Bearer ${TOKEN}" \
-    -d '{"notes":"Approved during FYP live demo — responding to detected attack"}')
-  echo "$APPROVE_RESP" | jq .
+    -H "$(auth)" \
+    -d "{\"anomalyId\": \"${ANOM_ID}\"}")
+  show "$RESP"
 
-  APPLIED_STATUS=$(echo "$APPROVE_RESP" | jq -r '.draft.status // "unknown"')
-  if [[ "$APPLIED_STATUS" == "applied" ]]; then
-    ok "Policy status: APPLIED — Istio AuthorizationPolicy is now live"
-  else
-    warn "Policy status after approval: $APPLIED_STATUS"
+  DID=$(echo "$RESP" | jq -r '.draft.draftId // empty')
+  if [[ -n "$DID" ]]; then
+    ANOMALY_DRAFT_IDS+=("$DID")
+    SVC=$(echo "$ANOMALIES_RESP" | jq -r ".anomalies[${i}].service // \"?\"")
+    TYPE=$(echo "$ANOMALIES_RESP" | jq -r ".anomalies[${i}].type // \"?\"")
+    ok "Draft from ${TYPE} anomaly on ${SVC}: ${DID}"
   fi
+done
 
-  echo ""
-  echo -e "${BOLD}  Step 4: Active policies currently enforced in the cluster${RESET}"
-  api_get "/policies/active"
+if [[ ${#ANOMALY_DRAFT_IDS[@]} -eq 0 ]]; then
+  warn "No anomaly-derived drafts created (no anomalies yet — live drafts below will still populate policy-review)"
 fi
 
-advance
+# ── create manual policy drafts (varied states) ───────────────────────────────
+# These ensure the frontend always has rich data regardless of Bookinfo/Istio state.
+step "Creating policy drafts for frontend state coverage..."
 
-# =============================================================================
-# SECTION 8 — Audit Trail
-# =============================================================================
-banner 8 "Audit Trail"
+create_draft() {
+  local body="$1"
+  curl -s -X POST "${API}/policies/drafts" \
+    -H "Content-Type: application/json" \
+    -H "$(auth)" \
+    -d "$body"
+}
 
-echo -e "${BOLD}  Full policy history — GET /policies/history${RESET}"
-api_get "/policies/history"
+# Draft A — will be APPROVED: lockdown details to GET from default ns
+RESP_A=$(create_draft '{
+  "service": "details",
+  "namespace": "default",
+  "rules": [
+    {
+      "from": {"source": {"namespaces": ["default"]}},
+      "to": {"operation": {"methods": ["GET"]}}
+    }
+  ],
+  "reason": "Restrict details service to GET-only from default namespace — response to TRAFFIC_SPIKE anomaly"
+}')
+show "$RESP_A"
+DRAFT_A=$(echo "$RESP_A" | jq -r '.draft.draftId // empty')
+[[ -n "$DRAFT_A" ]] && ok "Draft A (details / GET-only) → ${DRAFT_A}" || warn "Draft A creation failed"
 
-if [[ -n "$DRAFT_ID" ]]; then
-  echo ""
-  echo -e "${BOLD}  History for this policy — GET /policies/history/${DRAFT_ID}${RESET}"
-  api_get "/policies/history/${DRAFT_ID}"
+# Draft B — will be REJECTED: overly broad block on productpage
+RESP_B=$(create_draft '{
+  "service": "productpage",
+  "namespace": "default",
+  "rules": [
+    {
+      "from": {"source": {"namespaces": ["istio-system"]}},
+      "to": {"operation": {"methods": ["GET", "POST"]}}
+    }
+  ],
+  "reason": "Block all non-istio-system traffic to productpage — flagged for review (may break ingress)"
+}')
+show "$RESP_B"
+DRAFT_B=$(echo "$RESP_B" | jq -r '.draft.draftId // empty')
+[[ -n "$DRAFT_B" ]] && ok "Draft B (productpage / restrictive) → ${DRAFT_B}" || warn "Draft B creation failed"
+
+# Draft C — stays PENDING: whitelist for reviews via service account
+RESP_C=$(create_draft '{
+  "service": "reviews",
+  "namespace": "default",
+  "rules": [
+    {
+      "from": {"source": {"principals": ["cluster.local/ns/default/sa/bookinfo-productpage"]}},
+      "to": {"operation": {"methods": ["GET"]}}
+    }
+  ],
+  "reason": "Whitelist only productpage service account for reviews — following SUSPICIOUS_PATTERN detection"
+}')
+show "$RESP_C"
+DRAFT_C=$(echo "$RESP_C" | jq -r '.draft.draftId // empty')
+[[ -n "$DRAFT_C" ]] && ok "Draft C (reviews / pending for frontend review) → ${DRAFT_C}" || warn "Draft C creation failed"
+
+# Draft D — stays PENDING: ratings service egress restriction
+RESP_D=$(create_draft '{
+  "service": "ratings",
+  "namespace": "default",
+  "rules": [
+    {
+      "from": {"source": {"namespaces": ["default"]}},
+      "to": {"operation": {"methods": ["GET"], "paths": ["/ratings/*"]}}
+    }
+  ],
+  "reason": "Limit ratings service to scoped GET paths — UNEXPECTED_COMMUNICATION anomaly triggered from external source"
+}')
+show "$RESP_D"
+DRAFT_D=$(echo "$RESP_D" | jq -r '.draft.draftId // empty')
+[[ -n "$DRAFT_D" ]] && ok "Draft D (ratings / pending for frontend review) → ${DRAFT_D}" || warn "Draft D creation failed"
+
+# ── approve anomaly-derived drafts + Draft A ──────────────────────────────────
+step "Approving resolved drafts (admin)..."
+
+approve_draft() {
+  local did="$1" notes="$2"
+  [[ -z "$did" ]] && return
+  RESP=$(curl -s -X POST "${API}/policies/drafts/${did}/approve" \
+    -H "Content-Type: application/json" \
+    -H "$(auth)" \
+    -d "{\"notes\": \"${notes}\"}")
+  show "$RESP"
+  STATUS=$(echo "$RESP" | jq -r '.draft.status // "unknown"')
+  ok "Draft ${did} → ${STATUS}"
+}
+
+for did in "${ANOMALY_DRAFT_IDS[@]}"; do
+  approve_draft "$did" "Auto-approved during simulation — anomaly-derived policy is appropriate response"
+done
+
+approve_draft "$DRAFT_A" "Confirmed traffic spike from productpage. GET-only restriction on details is correct mitigation."
+
+# ── reject Draft B (as analyst — overly restrictive) ─────────────────────────
+step "Rejecting overly restrictive draft (analyst)..."
+
+if [[ -n "$DRAFT_B" && -n "$ANALYST_TOKEN" ]]; then
+  RESP=$(curl -s -X POST "${API}/policies/drafts/${DRAFT_B}/reject" \
+    -H "Content-Type: application/json" \
+    -H "$(auth_analyst)" \
+    -d '{"reason": "Rule is too restrictive — allowing only istio-system traffic would break external ingress access. Needs revision to also permit the ingress gateway service account."}')
+  show "$RESP"
+  STATUS=$(echo "$RESP" | jq -r '.draft.status // "unknown"')
+  ok "Draft ${DRAFT_B} → ${STATUS}"
+elif [[ -z "$ANALYST_TOKEN" ]]; then
+  warn "Skipping rejection — analyst token unavailable"
 fi
 
-advance
-
-# =============================================================================
-# SECTION 9 — Cluster Verification
-# =============================================================================
-banner 9 "Cluster Verification"
-
-echo -e "${BOLD}  Istio AuthorizationPolicies now enforced in cluster:${RESET}"
-cmd_header "kubectl get authorizationpolicies -A"
-kubectl get authorizationpolicies -A 2>/dev/null || warn "No AuthorizationPolicies found"
-
-echo ""
-POLICY_NAME=$(kubectl get authorizationpolicies -A 2>/dev/null \
-  --sort-by='.metadata.creationTimestamp' \
-  -o jsonpath='{.items[-1].metadata.name}' 2>/dev/null || echo "")
-POLICY_NS=$(kubectl get authorizationpolicies -A 2>/dev/null \
-  --sort-by='.metadata.creationTimestamp' \
-  -o jsonpath='{.items[-1].metadata.namespace}' 2>/dev/null || echo "")
-
-if [[ -n "$POLICY_NAME" && -n "$POLICY_NS" ]]; then
-  echo -e "${BOLD}  Most recent policy — full spec:${RESET}"
-  cmd_header "kubectl describe authorizationpolicy ${POLICY_NAME} -n ${POLICY_NS}"
-  kubectl describe authorizationpolicy "${POLICY_NAME}" -n "${POLICY_NS}" 2>/dev/null || true
-fi
-
-# ── cleanup background process if still running ───────────────────────────────
+# ── wait for background attack process ───────────────────────────────────────
 if [[ -n "$ATTACK_PID" ]] && kill -0 "$ATTACK_PID" 2>/dev/null; then
   wait "$ATTACK_PID" 2>/dev/null || true
 fi
 
-# ── closing summary ───────────────────────────────────────────────────────────
+# ── final state snapshot ──────────────────────────────────────────────────────
+step "Final state snapshot..."
+
+FINAL_ANOMALIES=$(curl -s "${API}/anomalies?limit=20" \
+  -H "$(auth)" | jq '.anomalies | length // 0' 2>/dev/null || echo "?")
+ACTIVE_POLICIES=$(curl -s "${API}/policies/active" \
+  -H "$(auth)" | jq '.policies | length // 0' 2>/dev/null || echo "?")
+PENDING_DRAFTS=$(curl -s "${API}/policies/drafts/pending" \
+  -H "$(auth)" | jq '.drafts | length // 0' 2>/dev/null || echo "?")
+
 echo ""
-echo -e "${CYAN}${BOLD}╔═════════════════════════════════════════════════════════╗${RESET}"
-echo -e "${CYAN}${BOLD}║                   DEMO COMPLETE                         ║${RESET}"
-echo -e "${CYAN}${BOLD}╠═════════════════════════════════════════════════════════╣${RESET}"
-echo -e "${CYAN}${BOLD}║  ✔  Cluster state verified (pods, CRDs, RBAC)           ║${RESET}"
-echo -e "${CYAN}${BOLD}║  ✔  API health confirmed                                ║${RESET}"
-echo -e "${CYAN}${BOLD}║  ✔  JWT authentication working                          ║${RESET}"
-echo -e "${CYAN}${BOLD}║  ✔  Service discovery operational                       ║${RESET}"
-echo -e "${CYAN}${BOLD}║  ✔  Istio telemetry flowing from Envoy sidecars         ║${RESET}"
-echo -e "${CYAN}${BOLD}║  ✔  Adversarial traffic simulated (4 attack patterns)   ║${RESET}"
-echo -e "${CYAN}${BOLD}║  ✔  Anomalies auto-detected in real time                ║${RESET}"
-echo -e "${CYAN}${BOLD}║  ✔  Policy auto-generated from anomaly                  ║${RESET}"
-echo -e "${CYAN}${BOLD}║  ✔  Human-in-the-loop approval executed                 ║${RESET}"
-echo -e "${CYAN}${BOLD}║  ✔  AuthorizationPolicy applied and live in cluster     ║${RESET}"
-echo -e "${CYAN}${BOLD}║  ✔  Full audit trail recorded                           ║${RESET}"
-echo -e "${CYAN}${BOLD}╚═════════════════════════════════════════════════════════╝${RESET}"
+echo -e "${CYAN}${BOLD}╔═══════════════════════════════════════════════════════════╗${RESET}"
+echo -e "${CYAN}${BOLD}║              Simulation Complete — System State           ║${RESET}"
+echo -e "${CYAN}${BOLD}╠═══════════════════════════════════════════════════════════╣${RESET}"
+printf "${CYAN}${BOLD}║  %-55s  ║${RESET}\n" "Anomalies detected:          ${FINAL_ANOMALIES}"
+printf "${CYAN}${BOLD}║  %-55s  ║${RESET}\n" "Active policies applied:     ${ACTIVE_POLICIES}"
+printf "${CYAN}${BOLD}║  %-55s  ║${RESET}\n" "Drafts awaiting review:      ${PENDING_DRAFTS}  ← approve/reject in frontend"
+echo -e "${CYAN}${BOLD}╠═══════════════════════════════════════════════════════════╣${RESET}"
+echo -e "${CYAN}${BOLD}║  Frontend pages to exercise:                              ║${RESET}"
+echo -e "${CYAN}${BOLD}║  • /dashboard      real-time telemetry stream             ║${RESET}"
+echo -e "${CYAN}${BOLD}║  • /anomalies      browse and filter detected anomalies   ║${RESET}"
+echo -e "${CYAN}${BOLD}║  • /policy-review  approve / reject pending drafts        ║${RESET}"
+echo -e "${CYAN}${BOLD}║  • /history        full audit trail (approved + rejected) ║${RESET}"
+echo -e "${CYAN}${BOLD}║  • /services       mesh services with health metrics      ║${RESET}"
+echo -e "${CYAN}${BOLD}╠═══════════════════════════════════════════════════════════╣${RESET}"
+echo -e "${CYAN}${BOLD}║  Credentials:  admin/admin123  •  analyst/analyst123      ║${RESET}"
+echo -e "${CYAN}${BOLD}║  Dashboard:    http://localhost:3000                      ║${RESET}"
+echo -e "${CYAN}${BOLD}╚═══════════════════════════════════════════════════════════╝${RESET}"
 echo ""
