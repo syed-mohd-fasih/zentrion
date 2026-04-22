@@ -161,48 +161,41 @@ fi
 
 echo ""
 
-# Step 10: Start the Next.js dashboard
-echo "🖥️  Step 10: Starting the Next.js dashboard..."
+# Step 10: Build Docker image for dashboard
+echo "🖥️  Step 10: Building Dashboard Docker image..."
 echo ""
 
-DASHBOARD_DIR="app/dashboard"
+eval $(minikube docker-env)
 
-# Create .env.local if it doesn't exist yet
-if [ ! -f "$DASHBOARD_DIR/.env.local" ]; then
-    cp "$DASHBOARD_DIR/.env.local.example" "$DASHBOARD_DIR/.env.local"
-    echo -e "${GREEN}✅ Created $DASHBOARD_DIR/.env.local from example${NC}"
-fi
+cd app/dashboard
+docker build -t zentrion/dashboard:latest . || {
+    echo -e "${RED}❌ Dashboard Docker build failed${NC}"
+    exit 1
+}
+cd ../..
 
-# Install dependencies if node_modules is missing
-if [ ! -d "$DASHBOARD_DIR/node_modules" ]; then
-    echo "Installing dashboard dependencies (this may take a minute)..."
-    (cd "$DASHBOARD_DIR" && npm install --silent) || {
-        echo -e "${RED}❌ npm install failed for dashboard${NC}"
-        echo "You can start it manually: cd app/dashboard && npm install && npm run dev"
-        DASHBOARD_PID=""
-    }
-fi
+echo -e "${GREEN}✅ Dashboard Docker image built${NC}"
+echo ""
 
-# Kill any existing dashboard dev server
-pkill -f "next dev" || true
+# Step 11: Deploy Dashboard to Kubernetes
+echo "🚀 Step 11: Deploying Dashboard..."
+kubectl apply -f manifests/dashboard-configmap.yaml
+kubectl apply -f manifests/dashboard-deployment.yaml
 
-# Start the dashboard in the background
-if [ -d "$DASHBOARD_DIR/node_modules" ]; then
-    (cd "$DASHBOARD_DIR" && npm run dev > /tmp/zentrion-dashboard.log 2>&1) &
-    DASHBOARD_PID=$!
-    echo -e "${GREEN}✅ Dashboard starting (PID: $DASHBOARD_PID)${NC}"
-    echo "   Logs: /tmp/zentrion-dashboard.log"
-    echo "   Waiting for Next.js to be ready..."
-    sleep 8
-    if kill -0 "$DASHBOARD_PID" 2>/dev/null; then
-        echo -e "${GREEN}✅ Dashboard is running${NC}"
-    else
-        echo -e "${YELLOW}⚠️  Dashboard process exited early — check /tmp/zentrion-dashboard.log${NC}"
-        DASHBOARD_PID=""
-    fi
-else
-    DASHBOARD_PID=""
-fi
+echo "Waiting for Dashboard to be ready..."
+kubectl wait --for=condition=ready pod -l app=zentrion-dashboard -n zentrion-system --timeout=180s || {
+    echo -e "${RED}❌ Dashboard failed to start${NC}"
+    kubectl logs -l app=zentrion-dashboard -n zentrion-system --tail=50
+    exit 1
+}
+echo -e "${GREEN}✅ Dashboard deployed${NC}"
+echo ""
+
+# Step 12: Port-forward for dashboard
+echo "🔌 Step 12: Setting up Dashboard port-forward..."
+pkill -f "kubectl port-forward.*zentrion-dashboard" || true
+kubectl port-forward -n zentrion-system svc/zentrion-dashboard 3000:3000 &
+DASHBOARD_PF_PID=$!
 
 echo ""
 
@@ -224,7 +217,7 @@ echo "  • viewer  / viewer123  (VIEWER  — read-only)"
 echo ""
 echo "🔧 Useful Commands:"
 echo "  • View API logs:     kubectl logs -f -l app=zentrion-orchestrator -n zentrion-system"
-echo "  • View dash logs:    tail -f /tmp/zentrion-dashboard.log"
+echo "  • View dash logs:    kubectl logs -f -l app=zentrion-dashboard -n zentrion-system"
 echo "  • Get pods:          kubectl get pods -n zentrion-system"
 echo "  • Get CRDs:          kubectl get securityprofiles,anomalyrecords,policyhistories -A"
 echo "  • Restart API:       kubectl rollout restart deployment/zentrion-orchestrator -n zentrion-system"
@@ -233,7 +226,7 @@ echo ""
 if [ -n "$PF_PID" ]; then
     echo "To stop port-forward:  kill $PF_PID"
 fi
-if [ -n "$DASHBOARD_PID" ]; then
-    echo "To stop dashboard:     kill $DASHBOARD_PID"
+if [ -n "$DASHBOARD_PF_PID" ]; then
+    echo "To stop dashboard pf:  kill $DASHBOARD_PF_PID"
 fi
 echo ""
