@@ -43,3 +43,10 @@ data:
   # Logging
   LOG_LEVEL: "info"
   LOG_FORMAT: "json"
+
+  # AI services
+  OLLAMA_HOST: "ollama.zentrion-system.svc.cluster.local"
+  OLLAMA_PORT: "11434"
+  OLLAMA_MODEL: "qwen2.5:7b"
+  ML_SERVICE_HOST: "host.minikube.internal"
+  ML_SERVICE_PORT: "8000"

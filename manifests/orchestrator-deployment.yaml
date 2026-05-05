@@ -98,7 +98,32 @@ spec:
                 configMapKeyRef:
                   name: orchestrator-config
                   key: LOG_LEVEL
-            
+            - name: OLLAMA_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: orchestrator-config
+                  key: OLLAMA_HOST
+            - name: OLLAMA_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: orchestrator-config
+                  key: OLLAMA_PORT
+            - name: OLLAMA_MODEL
+              valueFrom:
+                configMapKeyRef:
+                  name: orchestrator-config
+                  key: OLLAMA_MODEL
+            - name: ML_SERVICE_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: orchestrator-config
+                  key: ML_SERVICE_HOST
+            - name: ML_SERVICE_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: orchestrator-config
+                  key: ML_SERVICE_PORT
+
             # Secrets
             - name: JWT_SECRET
               valueFrom:

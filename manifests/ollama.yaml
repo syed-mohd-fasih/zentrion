@@ -1,0 +1,119 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ollama-pvc
+  namespace: zentrion-system
+  labels:
+    app: ollama
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 15Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ollama
+  namespace: zentrion-system
+  labels:
+    app: ollama
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ollama
+  template:
+    metadata:
+      labels:
+        app: ollama
+    spec:
+      containers:
+        - name: ollama
+          image: ollama/ollama:latest
+          imagePullPolicy: IfNotPresent
+          # Start server, wait for readiness, pull model only if not cached, then stay running.
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              ollama serve &
+              echo "Waiting for ollama server to be ready..."
+              until curl -sf http://localhost:11434/api/tags > /dev/null 2>&1; do
+                sleep 2
+              done
+              echo "Server ready. Checking for qwen2.5:7b..."
+              if ! ollama list 2>/dev/null | grep -q "qwen2.5:7b"; then
+                echo "Pulling qwen2.5:7b (~4.7GB, one-time download)..."
+                ollama pull qwen2.5:7b
+              else
+                echo "Model already cached, skipping pull."
+              fi
+              echo "Ollama is ready."
+              wait
+          ports:
+            - containerPort: 11434
+              name: http
+              protocol: TCP
+          resources:
+            requests:
+              memory: "6Gi"
+              cpu: "2"
+            limits:
+              memory: "10Gi"
+              cpu: "4"
+          # ── GPU Support (optional) ─────────────────────────────────────────────
+          # Uncomment ONLY if NVIDIA device plugin is installed in minikube.
+          # To enable GPU: minikube start --gpus=all --driver=docker
+          # Then install plugin:
+          #   kubectl apply -f https://raw.githubusercontent.com/NVIDIA/k8s-device-plugin/v0.16.0/deployments/static/nvidia-device-plugin.yml
+          # Verify GPU node label: kubectl get nodes -o json | grep nvidia
+          #
+          # resources:
+          #   requests:
+          #     memory: "6Gi"
+          #     nvidia.com/gpu: "1"
+          #   limits:
+          #     memory: "10Gi"
+          #     nvidia.com/gpu: "1"
+          # ──────────────────────────────────────────────────────────────────────
+          volumeMounts:
+            - name: ollama-data
+              mountPath: /root/.ollama
+          readinessProbe:
+            httpGet:
+              path: /api/tags
+              port: 11434
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /api/tags
+              port: 11434
+            # Allow time for the one-time model download on first boot.
+            initialDelaySeconds: 90
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+      volumes:
+        - name: ollama-data
+          persistentVolumeClaim:
+            claimName: ollama-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ollama
+  namespace: zentrion-system
+  labels:
+    app: ollama
+spec:
+  type: ClusterIP
+  selector:
+    app: ollama
+  ports:
+    - port: 11434
+      targetPort: 11434
+      protocol: TCP
+      name: http
