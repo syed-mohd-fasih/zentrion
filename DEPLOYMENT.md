@@ -14,6 +14,17 @@ Before deploying, ensure you have completed **ENVIRONMENT_SETUP.md**:
 - ✅ Telemetry is flowing (verified Envoy logs)
 - ✅ All Istio pods are Running
 
+### Hardware Requirements (AI Layer)
+
+| Component | Minimum | Recommended |
+|-----------|---------|-------------|
+| RAM | 16 GB | 32 GB |
+| Disk | 30 GB free | 50 GB free (minikube + 15 GB Ollama PVC) |
+| CPU | 4 cores | 8 cores |
+| GPU | — | RTX 4000+ (optional, ~10× faster inference) |
+
+> **Note:** Ollama stores qwen2.5:7b (~4.7 GB) on a PersistentVolumeClaim inside minikube. The model is downloaded once on first boot; subsequent pod restarts skip the download. The FastAPI ML service runs on the **host machine** (not in the cluster) since it needs CPU only and avoids adding another container to an already busy node.
+
 ---
 
 ## 🚀 **Quick Deploy (All-in-One)**
@@ -28,10 +39,14 @@ This script will:
 2. Apply all CRDs
 3. Apply RBAC
 4. Deploy PostgreSQL
-5. Deploy Orchestrator
-6. Wait for all pods to be ready
-7. Port-forward to localhost
-8. Install dashboard dependencies and start the Next.js dev server on port 3000
+5. Build and deploy the Orchestrator
+6. Deploy Ollama in-cluster (LLM for policy explanations)
+7. Print instructions for starting the FastAPI ML service on the host
+8. Wait for all pods to be ready
+9. Port-forward to localhost
+10. Build and deploy the Dashboard
+
+> **After the script finishes**, start the FastAPI ML service manually (see [AI Layer Setup](#-ai-layer-setup)) and optionally run the attack simulation scripts to generate training data.
 
 **Requirements:** `node` ≥ 20 and `npm` must be on your PATH before running the script.
 
@@ -195,6 +210,88 @@ curl -X POST http://localhost:3001/auth/login \
 
 ---
 
+## 🤖 **AI Layer Setup**
+
+### Step 7a: Ollama (In-Cluster LLM)
+
+Ollama is deployed automatically by `deploy.sh` via `manifests/ollama.yaml`. It runs as a Kubernetes Deployment in `zentrion-system` with a 15 Gi PVC for model storage.
+
+```bash
+# Apply manually if not using deploy.sh
+kubectl apply -f manifests/ollama.yaml
+
+# Monitor the first-time model download (~4.7 GB, one-time only)
+kubectl logs -n zentrion-system deploy/ollama -f
+# Done when you see: "Ollama ready."
+
+# Check readiness
+kubectl get pods -n zentrion-system -l app=ollama
+# READY 1/1 means Ollama is serving and qwen2.5:7b is loaded
+```
+
+> **First boot note:** `livenessProbe.initialDelaySeconds` is set to 90 s to allow the model pull to complete before Kubernetes starts health-checking. If the pod is in `0/1 Running` for several minutes, that is normal — it is downloading the model.
+
+**Optional GPU support:**  
+The Ollama manifest contains a commented-out GPU resource block. To enable it:
+1. Verify GPU works in minikube pods: `kubectl run gpu-test --image=nvidia/cuda:12.0-base --restart=Never -- nvidia-smi`
+2. Uncomment the `nvidia.com/gpu` resource block in `manifests/ollama.yaml`
+3. Re-apply: `kubectl apply -f manifests/ollama.yaml`
+
+---
+
+### Step 7b: FastAPI ML Anomaly Detector (Host Machine)
+
+The ML service runs on the host (not in the cluster). Pods reach it via `host.minikube.internal:8000`, which minikube injects automatically.
+
+```bash
+cd ai/anomaly_detector
+pip install -r requirements.txt
+```
+
+**First time — generate training data and train the model:**
+
+```bash
+# Port-forward Postgres so the export script can reach it
+kubectl port-forward -n zentrion-system svc/postgresql 5432:5432 &
+
+# Export telemetry into 5-minute feature windows (labels from rule-based detections)
+DB_HOST=localhost DB_PORT=5432 DB_NAME=zentrion DB_USER=zentrion DB_PASSWORD=zentrion123 \
+  python data/export_from_postgres.py
+
+# Train XGBoost → export ONNX
+python train.py
+# Outputs: model/anomaly_detector.onnx + model/label_encoder.json
+```
+
+> **Tip:** Run the attack simulation scripts first to populate the database with labelled anomaly data before exporting. More data = better model.
+
+```bash
+# Generate training data via attack simulation (~10 min)
+cd ai/attack_sim && ./run_all.sh
+```
+
+**Start the inference server:**
+
+```bash
+cd ai/anomaly_detector
+uvicorn serve:app --host 0.0.0.0 --port 8000
+# Health check: curl http://localhost:8000/health
+```
+
+Leave this running in a terminal (or use `tmux`/`screen`). The orchestrator checks `host.minikube.internal:8000` when AI detection mode is active.
+
+---
+
+### Step 7c: Enable AI Mode in the Dashboard
+
+1. Open **http://localhost:3000 → Settings**
+2. The **AI Service Health** card shows live status of Ollama and the ML service
+3. Once both show **Online**, click **AI-Powered** under Detection Mode
+4. Anomalies will now carry `[AI XX%]` confidence prefixes
+5. On any anomaly-generated policy draft, click **Explain with AI** for LLM reasoning and **Simulate** for sandbox impact analysis
+
+---
+
 ## 🖥️ **Step 8: Run the Dashboard (Next.js)**
 
 After the orchestrator is running and port-forwarded:
@@ -225,10 +322,12 @@ The dashboard will be available at **http://localhost:3000**.
 
 - **Overview** — Live telemetry stream, service count, error rate tiles
 - **Policy Review** — Three-stage workflow: incoming drafts → summary → YAML diff → approve/reject
+  - **Explain with AI** — LLM-generated explanation of why a policy was suggested and its expected impact
+  - **Simulate** — Sandbox evaluation of the policy against the last 24 h of real traffic logs, with effectiveness and false-positive scores
 - **Services** — Per-service health, attached policies, telemetry logs
-- **Anomalies** — Real-time anomaly list with detail view and policy generation
+- **Anomalies** — Real-time anomaly list with detail view and policy generation; AI-detected anomalies show `[AI XX%]` confidence score
 - **Audit Log** — Full policy lifecycle history with filters
-- **Settings / Access Control** — Stubs (coming in a future release)
+- **Settings** — Detection mode toggle (Rule-Based / AI-Powered), AI confidence threshold slider, sandbox window config, live AI service health
 
 ---
 
@@ -301,9 +400,43 @@ kubectl exec -it -n zentrion-system deployment/postgresql -- psql -U zentrion -d
  public | policy_drafts    | table | zentrion
  public | policy_history   | table | zentrion
  public | services         | table | zentrion
+ public | system_settings  | table | zentrion
  public | telemetry_logs   | table | zentrion
  public | users            | table | zentrion
 ```
+
+---
+
+### 4b. Ollama is Ready
+
+```bash
+kubectl get pods -n zentrion-system -l app=ollama
+# READY should be 1/1
+
+# Confirm the model is loaded
+kubectl exec -n zentrion-system deploy/ollama -- ollama list
+# Should show: qwen2.5:7b
+```
+
+---
+
+### 4c. AI Health Endpoint
+
+```bash
+curl -s http://localhost:3001/health | jq '.ai'
+```
+
+**Expected (both services online):**
+```json
+{
+  "detectionMode": "rules",
+  "ollama": true,
+  "mlService": true,
+  "model": "qwen2.5:7b"
+}
+```
+
+`mlService` will be `false` unless the FastAPI server is running on port 8000 of the host machine.
 
 ---
 
@@ -641,13 +774,15 @@ wait
 
 ---
 
-### 5. Review & Approve Policy (1 minute)
+### 5. Review & Approve Policy (2 minutes)
 
 **In dashboard → Policy Review:**
 1. **Stage 1 — Incoming:** New draft appears; click to select it
 2. **Stage 2 — Summary:** Shows service, namespace, reason, linked anomaly
+   - Click **"Explain with AI"** — a drawer slides in with LLM-generated reasoning (may take ~30 s on first call; hit "Check again" if not ready)
 3. **Stage 3 — Review:** YAML diff (before = current policy, after = generated YAML)
-4. Click **"Approve & Apply"** — toast confirms applied
+   - Click **"Simulate"** — runs the policy against the last 24 h of traffic; shows effectiveness score, false-positive risk, and a table of traffic that would be blocked
+4. Click **"Approve"** — toast confirms applied
 
 ---
 
@@ -671,4 +806,33 @@ That's it! Live Zero Trust policy enforcement, generated and applied in under 5 
 
 ---
 
+### 7. (Optional) Enable AI Detection Mode
+
+1. Dashboard → **Settings**
+2. Confirm Ollama and ML Service both show **Online**
+3. Click **AI-Powered** — detection mode switches live (no restart needed)
+4. Generate more attack traffic: `cd ai/attack_sim && ./run_all.sh`
+5. Anomalies page now shows `[AI 94%]`-style confidence scores instead of rule names
+
+---
+
 That's it! Your Zentrion system is deployed and operational.
+
+---
+
+## 🗑️ **AI Layer Cleanup**
+
+To remove only the AI components without touching the rest of the cluster:
+
+```bash
+kubectl delete -f manifests/ollama.yaml
+# This removes the Ollama Deployment, Service, and PVC (model weights deleted)
+```
+
+To keep the PVC (so the model doesn't need to be re-downloaded next time):
+
+```bash
+kubectl delete deployment ollama -n zentrion-system
+kubectl delete service ollama -n zentrion-system
+# Leave the PVC intact
+```

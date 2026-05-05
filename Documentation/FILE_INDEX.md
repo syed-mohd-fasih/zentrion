@@ -36,14 +36,15 @@ Every file in the production system.
 | `manifests/crds/policy-history.yaml` | PolicyHistory CRD | ✅ Done |
 | `manifests/crds/anomaly-record.yaml` | AnomalyRecord CRD | ✅ Done |
 
-### Infrastructure (5 files)
+### Infrastructure (6 files)
 | File | Description | Status |
 |------|-------------|--------|
 | `manifests/rbac.yaml` | RBAC (ClusterRole, ServiceAccount) | ✅ Done |
 | `manifests/postgresql.yaml` | PostgreSQL deployment | ✅ Done |
-| `manifests/orchestrator-configmap.yaml` | Configuration | ✅ Done |
-| `manifests/orchestrator-deployment.yaml` | Main deployment | ✅ Done |
-| `deploy.sh` | One-command deployment script | ✅ Done |
+| `manifests/orchestrator-configmap.yaml` | Configuration (incl. AI service env vars) | ✅ Done |
+| `manifests/orchestrator-deployment.yaml` | Main deployment (incl. AI env var refs) | ✅ Done |
+| `manifests/ollama.yaml` | Ollama PVC + Deployment + Service (in-cluster LLM) | ✅ Done |
+| `deploy.sh` | One-command deployment script (incl. Ollama step) | ✅ Done |
 
 ---
 
@@ -57,15 +58,16 @@ Every file in the production system.
 | `src/health.controller.ts` | Health check endpoint | ✅ Done |
 | `src/config/app.config.ts` | Configuration (synthetic config removed) | ✅ Done |
 
-### Database Module (7 files)
+### Database Module (8 files)
 | File | Description | Status |
 |------|-------------|--------|
 | `src/modules/database/database.module.ts` | TypeORM + PostgreSQL setup | ✅ Done |
 | `src/modules/database/entities/telemetry-log.entity.ts` | Telemetry log entity | ✅ Done |
 | `src/modules/database/entities/anomaly.entity.ts` | Anomaly entity | ✅ Done |
-| `src/modules/database/entities/policy-draft.entity.ts` | Policy draft entity | ✅ Done |
+| `src/modules/database/entities/policy-draft.entity.ts` | Policy draft (+ llmExplanation, sandboxResult cols) | ✅ Done |
 | `src/modules/database/entities/policy-history.entity.ts` | Policy history entity | ✅ Done |
 | `src/modules/database/entities/service.entity.ts` | Service entity | ✅ Done |
+| `src/modules/database/entities/system-setting.entity.ts` | Key-value runtime settings | ✅ Done |
 | `src/modules/database/entities/user.entity.ts` | User entity | ✅ Done |
 
 ### Auth Module
@@ -117,25 +119,60 @@ Every file in the production system.
 | `src/modules/telemetry/telemetry.controller.ts` | REST endpoints (DB queries) | ✅ Done |
 | `src/modules/telemetry/telemetry.gateway.ts` | WebSocket gateway (emits real-time events) | ✅ Done |
 
+### Settings Module
+| File | Description | Status |
+|------|-------------|--------|
+| `src/modules/settings/settings.module.ts` | Settings module (exports SettingsService) | ✅ Done |
+| `src/modules/settings/settings.service.ts` | OnModuleInit seeds defaults, in-memory cache | ✅ Done |
+| `src/modules/settings/settings.controller.ts` | GET /settings, PATCH /settings (ADMIN) | ✅ Done |
+
 ### Anomaly Module
 | File | Description | Status |
 |------|-------------|--------|
-| `src/modules/anomaly/anomaly.module.ts` | Anomaly module (Anomaly + TelemetryLog repos) | ✅ Done |
-| `src/modules/anomaly/anomaly.service.ts` | 8 detection rules, reads from DB, saves to DB | ✅ Done |
+| `src/modules/anomaly/anomaly.module.ts` | Anomaly module (+ AiDetectionService + SettingsModule) | ✅ Done |
+| `src/modules/anomaly/anomaly.service.ts` | Rules OR ML detection, routed by SettingsService | ✅ Done |
 | `src/modules/anomaly/anomaly.controller.ts` | REST endpoints (DB queries) | ✅ Done |
+| `src/modules/anomaly/ai-detection.service.ts` | Calls FastAPI XGBoost ONNX service (host:8000) | ✅ Done |
 
 ### Policy Module
 | File | Description | Status |
 |------|-------------|--------|
-| `src/modules/policy/policy.module.ts` | Policy module (PolicyDraft + PolicyHistory + Anomaly repos) | ✅ Done |
-| `src/modules/policy/policy.service.ts` | Full workflow: DB-backed drafts/history, applies to K8s | ✅ Done |
-| `src/modules/policy/policy.controller.ts` | REST endpoints (DB queries, no store imports) | ✅ Done |
+| `src/modules/policy/policy.module.ts` | Policy module (+ LlmService + SandboxService + SettingsModule) | ✅ Done |
+| `src/modules/policy/policy.service.ts` | Draft workflow + async LLM explanation + simulate | ✅ Done |
+| `src/modules/policy/policy.controller.ts` | REST endpoints + GET explain + POST simulate | ✅ Done |
 | `src/modules/policy/policy.dto.ts` | Request DTOs | ✅ Done |
+| `src/modules/policy/llm.service.ts` | Calls Ollama /api/generate, parses LLM JSON response | ✅ Done |
+| `src/modules/policy/sandbox.service.ts` | Simulates policy against historical traffic (pure-JS) | ✅ Done |
 
 ### Bootstrap
 | File | Description | Status |
 |------|-------------|--------|
 | `src/bootstrap/seed.ts` | Seeds 3 default users (admin/analyst/viewer) to PostgreSQL | ✅ Done |
+
+---
+
+## 🤖 **AI Layer Files**
+
+### Python ML Service (`ai/anomaly_detector/`)
+| File | Description | Status |
+|------|-------------|--------|
+| `requirements.txt` | FastAPI, XGBoost, ONNX, scikit-learn, psycopg2 | ✅ Done |
+| `data/export_from_postgres.py` | Exports telemetry → 5-min feature windows CSV | ✅ Done |
+| `train.py` | Trains XGBClassifier, exports ONNX + label encoder | ✅ Done |
+| `serve.py` | FastAPI server: GET /health, POST /detect | ✅ Done |
+
+### Attack Simulation (`ai/attack_sim/`)
+| File | Description | Status |
+|------|-------------|--------|
+| `traffic_spike.py` | 20-thread flood for 60 s | ✅ Done |
+| `suspicious_pattern.py` | 50+ requests from single IP | ✅ Done |
+| `new_endpoint.py` | Probes /admin, /.env, /config, /debug | ✅ Done |
+| `unauthorized_access.py` | Invalid/missing auth requests | ✅ Done |
+| `high_error_rate.py` | Requests to non-existent paths | ✅ Done |
+| `latency_anomaly.py` | Concurrent requests overwhelming endpoint | ✅ Done |
+| `unusual_source.py` | X-Forwarded-For spoofing | ✅ Done |
+| `normal_traffic.py` | Realistic baseline (0.5–3 s delays) | ✅ Done |
+| `run_all.sh` | Runs all 8 scripts in parallel | ✅ Done |
 
 ---
 
@@ -170,16 +207,19 @@ bcrypt
 
 ## ✅ **Deployment Status**
 
-Phase 3 (Deployment) is **complete**. All backend services are deployed and verified.
+All phases are **complete**.
 
 1. ☑ Setup minikube cluster + Istio
 2. ☑ Apply CRDs: `kubectl apply -f manifests/crds/`
 3. ☑ Apply RBAC: `kubectl apply -f manifests/rbac.yaml`
 4. ☑ Deploy PostgreSQL: `kubectl apply -f manifests/postgresql.yaml`
 5. ☑ Build Docker image and push to minikube
-6. ☑ Deploy Zentrion: `./deploy.sh`
+6. ☑ Deploy Zentrion + Ollama: `./deploy.sh`
 7. ☑ Deploy Bookinfo sample app and verify telemetry
-8. ☑ Test all 22 API endpoints
-9. ☐ Connect Next.js dashboard — **next phase**
+8. ☑ Dashboard deployed and connected
+9. ☑ AI layer: Settings page, Explain drawer, Simulate modal
+10. ☐ Start FastAPI ML service on host: `cd ai/anomaly_detector && uvicorn serve:app --host 0.0.0.0 --port 8000`
+11. ☐ Train model (run attack sim → export → train)
+12. ☐ Enable AI detection mode via Settings page
 
-See `DEMO.md` for a step-by-step demo walkthrough.
+See `DEPLOYMENT.md` for full deployment guide including AI layer setup.

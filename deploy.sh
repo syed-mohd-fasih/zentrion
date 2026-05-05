@@ -109,6 +109,32 @@ kubectl wait --for=condition=ready pod -l app=zentrion-orchestrator -n zentrion-
 echo -e "${GREEN}✅ Orchestrator deployed${NC}"
 echo ""
 
+# Step 6b: Deploy Ollama (LLM for policy explanations)
+echo "🤖 Step 6b: Deploying Ollama (in-cluster LLM)..."
+kubectl apply -f manifests/ollama.yaml
+
+echo -e "${YELLOW}⏳ Ollama is starting. On first boot it downloads qwen2.5:7b (~4.7 GB).${NC}"
+echo "   This can take 5–15 minutes depending on disk speed."
+echo "   Deployment continues — Ollama readiness does NOT block the orchestrator."
+echo "   Monitor progress: kubectl logs -n zentrion-system deploy/ollama -f"
+echo -e "${GREEN}✅ Ollama manifest applied${NC}"
+echo ""
+
+# Step 6c: FastAPI ML Service reminder
+echo "🧠 Step 6c: FastAPI ML Anomaly Detector"
+echo -e "${YELLOW}   ℹ️  The ML service runs on the HOST (not in the cluster) and must be started manually:${NC}"
+echo ""
+echo "   cd ai/anomaly_detector"
+echo "   pip install -r requirements.txt"
+echo "   # First time only — generate training data and train the model:"
+echo "   python data/export_from_postgres.py   # requires DB port-forward or host Postgres access"
+echo "   python train.py"
+echo "   # Start the server:"
+echo "   uvicorn serve:app --host 0.0.0.0 --port 8000"
+echo ""
+echo "   Pods reach it via host.minikube.internal:8000 (injected by minikube automatically)."
+echo ""
+
 # Step 7: Verify deployment
 echo "🔍 Step 7: Verifying deployment..."
 echo ""
@@ -218,10 +244,18 @@ echo ""
 echo "🔧 Useful Commands:"
 echo "  • View API logs:     kubectl logs -f -l app=zentrion-orchestrator -n zentrion-system"
 echo "  • View dash logs:    kubectl logs -f -l app=zentrion-dashboard -n zentrion-system"
+echo "  • View Ollama logs:  kubectl logs -f -n zentrion-system deploy/ollama"
 echo "  • Get pods:          kubectl get pods -n zentrion-system"
 echo "  • Get CRDs:          kubectl get securityprofiles,anomalyrecords,policyhistories -A"
 echo "  • Restart API:       kubectl rollout restart deployment/zentrion-orchestrator -n zentrion-system"
 echo "  • Open Kiali:        istioctl dashboard kiali"
+echo ""
+echo "🤖 AI Layer:"
+echo "  • Ollama status:     kubectl get pods -n zentrion-system -l app=ollama"
+echo "  • Model download:    kubectl logs -n zentrion-system deploy/ollama -f"
+echo "  • Start ML service:  cd ai/anomaly_detector && uvicorn serve:app --host 0.0.0.0 --port 8000"
+echo "  • Enable AI mode:    Dashboard → Settings → Detection Mode → AI-Powered"
+echo "  • Run attack sim:    cd ai/attack_sim && ./run_all.sh"
 echo ""
 if [ -n "$PF_PID" ]; then
     echo "To stop port-forward:  kill $PF_PID"

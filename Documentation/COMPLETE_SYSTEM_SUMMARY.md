@@ -15,22 +15,30 @@
 6. **IMPLEMENTATION_CHECKLIST.md** - Complete checklist
 7. **FILE_INDEX.md** - All files reference
 
-### 🏗️ **Infrastructure (15 files)**
+### 🏗️ **Infrastructure (16 files)**
 - 3 Custom Resource Definitions (CRDs)
 - RBAC manifests (ClusterRole, ServiceAccount, Bindings)
 - PostgreSQL deployment
-- Orchestrator deployment
-- ConfigMap
+- Orchestrator deployment + ConfigMap (with AI service config)
+- Ollama in-cluster deployment (PVC + Deployment + Service)
 - Dockerfile + .dockerignore
 - One-command deployment script (`deploy.sh`)
 
-### 💻 **Backend Code (35+ files)**
-- **Database Module** - TypeORM + PostgreSQL (7 entities)
+### 💻 **Backend Code (45+ files)**
+- **Database Module** - TypeORM + PostgreSQL (8 entities incl. `system_settings`)
 - **Istio Module** - Real telemetry watcher
 - **CRD Module** - Manage Zentrion custom resources
 - **Service Discovery** - Watch Kubernetes deployments
 - **Real K8s Client** - Apply policies to cluster
-- **Updated Services** - Telemetry, Anomaly, Policy (use database)
+- **Settings Module** - Runtime key-value config with in-memory cache
+- **LLM Service** - Calls Ollama (qwen2.5:7b) to generate policy explanations
+- **Sandbox Service** - Simulates policy impact on historical traffic (pure-JS CIDR eval)
+- **AI Detection Service** - Calls FastAPI XGBoost ONNX service for ML anomaly detection
+- **Updated Services** - Telemetry, Anomaly (AI/rules toggle), Policy (async LLM + simulate)
+
+### 🤖 **AI Layer**
+- `ai/anomaly_detector/` — Python FastAPI + XGBoost/ONNX ML service (host machine)
+- `ai/attack_sim/` — 8 attack simulation scripts + `run_all.sh` for generating training data
 
 ---
 
@@ -38,13 +46,15 @@
 
 ```
 1. Watches ALL traffic in your Kubernetes cluster via Istio sidecars
-2. Detects anomalies using 8 rule-based detection algorithms
-3. Automatically generates Istio AuthorizationPolicy manifests
-4. Human-in-the-loop approval workflow (Admin reviews policies)
-5. Applies approved policies directly to the cluster
-6. Full audit trail stored in PostgreSQL + Kubernetes CRDs
-7. Real-time dashboard via WebSocket
-8. Production-grade architecture (PostgreSQL, TypeORM, NestJS)
+2. Detects anomalies using 8 rule-based detectors OR a trained XGBoost ML model
+   (toggle between modes live from the Settings page — no restart required)
+3. Automatically generates Istio AuthorizationPolicy manifests with LLM explanations
+4. Sandbox simulation — preview which traffic a policy would block before applying it
+5. Human-in-the-loop approval workflow (Admin reviews policies)
+6. Applies approved policies directly to the cluster
+7. Full audit trail stored in PostgreSQL + Kubernetes CRDs
+8. Real-time dashboard via WebSocket
+9. Production-grade architecture (PostgreSQL, TypeORM, NestJS)
 ```
 
 ---
@@ -125,8 +135,9 @@ zentrion/
 │         │   Zentrion Pod      │                         │
 │         ├─────────────────────┤                         │
 │         │ Istio Watcher       │◄─── Watches Envoy logs │
-│         │ Anomaly Detector    │◄─── 8 detection rules  │
-│         │ Policy Generator    │◄─── Template-based     │
+│         │ Anomaly Detector    │◄─── rules OR ML model  │
+│         │ Policy Generator    │◄─── + async LLM expl.  │
+│         │ Sandbox Service     │◄─── simulate impact    │
 │         │ K8s API Client      │◄─── Applies policies   │
 │         │ CRD Manager         │◄─── Manages state      │
 │         │ REST + WebSocket    │◄─── Dashboard API      │
@@ -136,19 +147,25 @@ zentrion/
 │         │   PostgreSQL        │◄─── Persistent storage │
 │         └─────────────────────┘                         │
 │                                                           │
+│  ┌──────────────────────┐                               │
+│  │  Ollama Pod          │◄─── qwen2.5:7b via PVC       │
+│  │  (LLM explanations)  │     ollama.zentrion-system    │
+│  └──────────────────────┘                               │
+│                                                           │
 │  Custom Resources (CRDs)                                 │
 │  - SecurityProfile                                       │
 │  - AnomalyRecord                                         │
 │  - PolicyHistory                                         │
 │                                                           │
 └───────────────────────────────────────────────────────────┘
-                         │
-                         │ HTTP/WebSocket
-                         ▼
-                ┌─────────────────┐
-                │  Next.js        │
-                │  Dashboard      │
-                └─────────────────┘
+              │                        │
+              │ HTTP/WebSocket          │ HTTP (host.minikube.internal:8000)
+              ▼                        ▼
+     ┌─────────────────┐    ┌──────────────────────┐
+     │  Next.js        │    │  FastAPI ML Service  │
+     │  Dashboard      │    │  XGBoost ONNX        │
+     └─────────────────┘    │  (host machine)      │
+                            └──────────────────────┘
 ```
 
 ---
@@ -177,10 +194,11 @@ zentrion/
    - Admin approval required
    - Reviewable decisions
 
-5. **Extensible** ✅
-   - Ready for AI/ML integration
-   - Placeholder architecture
-   - Clear upgrade path
+5. **AI/ML Integration** ✅
+   - XGBoost ONNX anomaly detector (trained on real cluster traffic)
+   - Local LLM (qwen2.5:7b via Ollama) for policy explanations — 100% offline
+   - Policy sandbox simulation with effectiveness + false-positive scoring
+   - Live detection mode toggle (no restart required)
 
 6. **Demo-able** ✅
    - 5-minute live demo
