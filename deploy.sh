@@ -109,15 +109,21 @@ kubectl wait --for=condition=ready pod -l app=zentrion-orchestrator -n zentrion-
 echo -e "${GREEN}✅ Orchestrator deployed${NC}"
 echo ""
 
-# Step 6b: Deploy Ollama (LLM for policy explanations)
-echo "🤖 Step 6b: Deploying Ollama (in-cluster LLM)..."
-kubectl apply -f manifests/ollama.yaml
-
-echo -e "${YELLOW}⏳ Ollama is starting. On first boot it downloads qwen2.5:7b (~4.7 GB).${NC}"
-echo "   This can take 5–15 minutes depending on disk speed."
-echo "   Deployment continues — Ollama readiness does NOT block the orchestrator."
-echo "   Monitor progress: kubectl logs -n zentrion-system deploy/ollama -f"
-echo -e "${GREEN}✅ Ollama manifest applied${NC}"
+# Step 6b: Ollama runs on WSL2 host (NOT in cluster — GPU virtualisation doesn't reach inside minikube)
+echo "🤖 Step 6b: Ollama (WSL2 host)"
+echo -e "${YELLOW}   Ollama runs on the host, not inside the cluster.${NC}"
+echo "   Pods reach it at host.minikube.internal:11434"
+echo ""
+echo "   If not yet running:"
+echo "     ollama serve &"
+echo "     ollama pull qwen2.5:7b   # one-time, ~4.7 GB"
+echo ""
+# Verify Ollama is reachable from the host before continuing
+if curl -sf http://localhost:11434/api/tags > /dev/null 2>&1; then
+    echo -e "${GREEN}✅ Ollama is running on host (localhost:11434)${NC}"
+else
+    echo -e "${YELLOW}⚠️  Ollama not detected on localhost:11434. Start it with: ollama serve &${NC}"
+fi
 echo ""
 
 # Step 6c: FastAPI ML Service reminder
@@ -251,8 +257,8 @@ echo "  • Restart API:       kubectl rollout restart deployment/zentrion-orche
 echo "  • Open Kiali:        istioctl dashboard kiali"
 echo ""
 echo "🤖 AI Layer:"
-echo "  • Ollama status:     kubectl get pods -n zentrion-system -l app=ollama"
-echo "  • Model download:    kubectl logs -n zentrion-system deploy/ollama -f"
+echo "  • Ollama (host):     curl http://localhost:11434/api/tags"
+echo "  • Ollama logs:       journalctl --user -u ollama -f   (or check your terminal)"
 echo "  • Start ML service:  cd ai/anomaly_detector && uvicorn serve:app --host 0.0.0.0 --port 8000"
 echo "  • Enable AI mode:    Dashboard → Settings → Detection Mode → AI-Powered"
 echo "  • Run attack sim:    cd ai/attack_sim && ./run_all.sh"
