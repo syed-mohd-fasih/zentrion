@@ -1,4 +1,12 @@
 CLAUDE.md
 DEMO.md
+
+
+# Python env ignores
 ai/anomaly_detector/venv/
 ai/anomaly_detector/__pycache__/
+
+
+# file types for mdel training
+*.joblib
+*.csv

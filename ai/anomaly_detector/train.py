@@ -17,8 +17,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
 from sklearn.metrics import classification_report
 from xgboost import XGBClassifier
-from skl2onnx import convert_sklearn
-from skl2onnx.common.data_types import FloatTensorType
+import joblib
 
 FEATURES = [
     "request_count", "error_rate", "p95_latency_ms", "mean_latency_ms",
@@ -54,30 +53,28 @@ def main():
         X, y, test_size=0.2, random_state=42, stratify=y
     )
 
+    n_classes = len(le.classes_)
     print("\nTraining XGBoost classifier...")
     clf = XGBClassifier(
         n_estimators=200,
         max_depth=6,
         learning_rate=0.1,
-        use_label_encoder=False,
-        eval_metric="mlogloss",
+        objective="binary:logistic" if n_classes == 2 else "multi:softprob",
+        num_class=None if n_classes == 2 else n_classes,
+        eval_metric="logloss" if n_classes == 2 else "mlogloss",
         random_state=42,
         n_jobs=-1,
     )
-    clf.fit(X_train, y_train, eval_set=[(X_test, y_test)], verbose=50)
+    clf.fit(X_train, y_train, verbose=False)
 
     y_pred = clf.predict(X_test)
     print("\nClassification Report:")
     print(classification_report(y_test, y_pred, target_names=[label_map[i] for i in range(len(label_map))]))
 
-    print("\nExporting to ONNX...")
-    initial_type = [("float_input", FloatTensorType([None, len(FEATURES)]))]
-    onnx_model = convert_sklearn(clf, initial_types=initial_type, target_opset=17)
-
-    onnx_path = os.path.join(MODEL_DIR, "anomaly_detector.onnx")
-    with open(onnx_path, "wb") as f:
-        f.write(onnx_model.SerializeToString())
-    print(f"Model saved to {onnx_path}")
+    print("\nSaving model...")
+    model_path = os.path.join(MODEL_DIR, "anomaly_detector.joblib")
+    joblib.dump(clf, model_path)
+    print(f"Model saved to {model_path}")
 
 
 if __name__ == "__main__":

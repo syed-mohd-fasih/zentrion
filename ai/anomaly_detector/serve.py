@@ -14,13 +14,13 @@ Endpoints:
 import os
 import json
 import numpy as np
-import onnxruntime as ort
+import joblib
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import Any
 
 MODEL_DIR = os.path.join(os.path.dirname(__file__), "model")
-ONNX_PATH = os.path.join(MODEL_DIR, "anomaly_detector.onnx")
+MODEL_PATH = os.path.join(MODEL_DIR, "anomaly_detector.joblib")
 LABEL_PATH = os.path.join(MODEL_DIR, "label_encoder.json")
 
 FEATURES = [
@@ -33,22 +33,19 @@ FEATURES = [
 
 app = FastAPI(title="Zentrion Anomaly Detector")
 
-# Load at startup — not per-request.
-_session: ort.InferenceSession | None = None
+_clf = None
 _label_map: dict[str, str] = {}
-_input_name: str = ""
 
 
 @app.on_event("startup")
 def load_model():
-    global _session, _label_map, _input_name
-    if not os.path.exists(ONNX_PATH):
-        raise RuntimeError(f"Model not found at {ONNX_PATH}. Run train.py first.")
-    _session = ort.InferenceSession(ONNX_PATH, providers=["CPUExecutionProvider"])
-    _input_name = _session.get_inputs()[0].name
+    global _clf, _label_map
+    if not os.path.exists(MODEL_PATH):
+        raise RuntimeError(f"Model not found at {MODEL_PATH}. Run train.py first.")
+    _clf = joblib.load(MODEL_PATH)
     with open(LABEL_PATH) as f:
         _label_map = json.load(f)
-    print(f"Model loaded: {ONNX_PATH}")
+    print(f"Model loaded: {MODEL_PATH}")
     print(f"Classes: {_label_map}")
 
 
@@ -70,12 +67,12 @@ class DetectResponse(BaseModel):
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "model_loaded": _session is not None}
+    return {"status": "ok", "model_loaded": _clf is not None}
 
 
 @app.post("/detect", response_model=DetectResponse)
 def detect(request: DetectRequest):
-    if _session is None:
+    if _clf is None:
         raise HTTPException(status_code=503, detail="Model not loaded")
 
     results = []
@@ -86,12 +83,9 @@ def detect(request: DetectRequest):
             features[feat] = float(log.get(feat, 0) or 0)
 
         X = np.array([[features[f] for f in FEATURES]], dtype=np.float32)
-        output = _session.run(None, {_input_name: X})
-
-        # output[0] = predicted class index, output[1] = probability dict
-        pred_class = int(output[0][0])
-        proba_dict = output[1][0] if len(output) > 1 else {}
-        confidence = float(proba_dict.get(pred_class, 0.0)) if isinstance(proba_dict, dict) else 0.5
+        pred_class = int(_clf.predict(X)[0])
+        proba = _clf.predict_proba(X)[0]
+        confidence = float(proba[pred_class])
 
         anomaly_type = _label_map.get(str(pred_class), "UNKNOWN")
         if anomaly_type == "NORMAL":
