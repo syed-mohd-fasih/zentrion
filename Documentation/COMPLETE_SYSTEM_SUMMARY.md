@@ -20,9 +20,9 @@
 - RBAC manifests (ClusterRole, ServiceAccount, Bindings)
 - PostgreSQL deployment
 - Orchestrator deployment + ConfigMap (with AI service config)
-- Ollama in-cluster deployment (PVC + Deployment + Service)
+- Ollama runs as a **sibling Docker container on the `minikube` network** (not as a pod). Models persist on the host at `~/.ollama/`. The legacy `manifests/ollama.yaml` is kept but unused.
 - Dockerfile + .dockerignore
-- One-command deployment script (`deploy.sh`)
+- One-command deployment script (`deploy.sh`) — idempotent, manages the Ollama container, rolls out new images via `kubectl rollout restart`, supports `--no-cache`
 
 ### 💻 **Backend Code (45+ files)**
 - **Database Module** - TypeORM + PostgreSQL (8 entities incl. `system_settings`)
@@ -31,10 +31,12 @@
 - **Service Discovery** - Watch Kubernetes deployments
 - **Real K8s Client** - Apply policies to cluster
 - **Settings Module** - Runtime key-value config with in-memory cache
-- **LLM Service** - Calls Ollama (qwen2.5:7b) to generate policy explanations
+- **LLM Service** - Calls Ollama (qwen2.5:7b) for: (a) policy explanations via `/api/generate`, (b) compliance scoring (5-min cache), (c) streaming per-draft chat via `/api/chat` with `stream:true`. Handles the "no model loaded" case cleanly.
 - **Sandbox Service** - Simulates policy impact on historical traffic (pure-JS CIDR eval)
 - **AI Detection Service** - Calls FastAPI XGBoost ONNX service for ML anomaly detection
-- **Updated Services** - Telemetry, Anomaly (AI/rules toggle), Policy (async LLM + simulate)
+- **Anomaly Mutation Endpoints** - `/anomalies/:id/resolve`, `/anomalies/:id/whitelist`, `/anomalies/:id/block-ip` (last one drafts a deny policy from the source IP)
+- **Per-draft AI Chat** - `policy_drafts.chatHistory` jsonb column. First open of the chat drawer auto-seeds the conversation with a structured explanation of the draft (LLM-generated, cached); subsequent user turns are appended to the same array.
+- **Updated Services** - Telemetry, Anomaly (AI/rules toggle), Policy (async LLM + simulate + chat)
 
 ### 🤖 **AI Layer**
 - `ai/anomaly_detector/` — Python FastAPI + XGBoost/ONNX ML service (host machine)
@@ -147,10 +149,16 @@ zentrion/
 │         │   PostgreSQL        │◄─── Persistent storage │
 │         └─────────────────────┘                         │
 │                                                           │
-│  ┌──────────────────────┐                               │
-│  │  Ollama Pod          │◄─── qwen2.5:7b via PVC       │
-│  │  (LLM explanations)  │     ollama.zentrion-system    │
-│  └──────────────────────┘                               │
+│                                                           │
+└──────────────────────────────────────────────────────────┘
+
+   ┌──────────────────────────┐
+   │  Ollama Docker container │◄─── qwen2.5:7b, host bind-mount ~/.ollama
+   │  (sibling on minikube    │     reached at 192.168.49.3:11434
+   │   network, not a pod)    │     Explanations / Compliance / Streaming chat
+   └──────────────────────────┘
+
+┌──────────────────────────────────────────────────────────┐
 │                                                           │
 │  Custom Resources (CRDs)                                 │
 │  - SecurityProfile                                       │

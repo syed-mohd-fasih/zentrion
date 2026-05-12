@@ -495,6 +495,36 @@ echo "✅ All checks passed!"
 
 ---
 
+## 🆕 **Recent Additions (post-MVP hardening)**
+
+These items have shipped since the original MVP and are reflected throughout the codebase. The original checklist above remains the canonical first-time setup; this section tracks what now works that didn't before.
+
+### Frontend
+- [x] Dashboard charts (Service Health, Traffic Volume) — live Recharts seeded with the last ~200 historical logs so the dashboard isn't empty on cold open
+- [x] AI Compliance Score stat card — value + hover tooltip with the LLM summary; 5-min server cache
+- [x] Anomaly list — `limit` removed, refresh button restored, `critical` severity filter chip added, status badge bound directly to `anomaly.resolved`
+- [x] Anomaly detail actions — `Mark Resolved`, `Block Source IP` (drafts a deny policy), `Whitelist Source`; all gated to ADMIN/ANALYST
+- [x] **AI Policy Assistant chat drawer** — replaces the old single-shot Explain panel. First open auto-seeds a structured explanation of the draft as the assistant's opening turn; user can ask follow-ups; replies stream token-by-token via SSE; full conversation persists in `policy_drafts.chatHistory`.
+- [x] Login page reachable on first visit (`app/page.tsx` now respects `useAuth().isAuthenticated` before redirecting)
+
+### Backend
+- [x] `LlmService.chatStream()` — uses Ollama `/api/chat` with `stream:true`; line-by-line JSON parse; abortable
+- [x] `LlmService.generateComplianceScore()` — short structured prompt; 30s timeout
+- [x] `PolicyService.bootstrapChat()` — when chat history is empty on first read, generates a seed explanation and persists it as `chatHistory[0]` so every subsequent open shows the same thing (deduped via in-flight Map)
+- [x] `PolicyService.chatWithDraft()` — appends user/assistant turns to `policy_drafts.chatHistory`; rebuilds the Ollama messages array with a system prompt that pins draft YAML + anomaly context so the model stays on-topic
+- [x] `LlmService.isAvailable()` — also checks that at least one model is loaded (avoids the "Ollama reachable but no model" trap)
+- [x] YAML builder — `needsQuoting()` now quotes strings containing `:`, `#`, flow chars, or leading whitespace; fixes `js-yaml` parse errors when annotation values contained colons (was breaking *Simulate*)
+- [x] Anomaly mutation endpoints — `PATCH /anomalies/:id/resolve`, `PATCH /anomalies/:id/whitelist`, `POST /anomalies/:id/block-ip` (last one reuses `policyService.generatePolicyFromAnomaly`)
+- [x] New `chatHistory` jsonb column on `policy_drafts` (added automatically when `DB_SYNC=true`)
+
+### Ops
+- [x] Ollama runs as a **sibling Docker container on the `minikube` network**; models persist on the host at `~/.ollama/`
+- [x] `deploy.sh` is idempotent — manages the Ollama container's bind mount/restart policy and pulls `qwen2.5:7b` only when missing
+- [x] `deploy.sh --no-cache` flag for clean image rebuilds
+- [x] Image tag standardization — orchestrator: `zentrion/orchestrator-api:latest`, dashboard: `zentrion/dashboard:latest`; `deploy.sh` now `kubectl rollout restart`s after building so re-runs actually pick up new code
+
+---
+
 **You're ready to go! 🚀**
 
 Estimated total time: **4-6 hours** (including environment setup)

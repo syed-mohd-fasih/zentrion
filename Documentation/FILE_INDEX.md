@@ -43,8 +43,8 @@ Every file in the production system.
 | `manifests/postgresql.yaml` | PostgreSQL deployment | ✅ Done |
 | `manifests/orchestrator-configmap.yaml` | Configuration (incl. AI service env vars) | ✅ Done |
 | `manifests/orchestrator-deployment.yaml` | Main deployment (incl. AI env var refs) | ✅ Done |
-| `manifests/ollama.yaml` | Ollama PVC + Deployment + Service (in-cluster LLM) | ✅ Done |
-| `deploy.sh` | One-command deployment script (incl. Ollama step) | ✅ Done |
+| `manifests/ollama.yaml` | (Legacy) in-cluster Ollama deployment. Current setup runs Ollama as a sibling Docker container on the `minikube` network with a host bind mount; managed by `deploy.sh`. | ⚠️ Deprecated |
+| `deploy.sh` | One-command deployment script. Manages the Ollama container lifecycle (persistent volume), builds + rolls out orchestrator & dashboard, supports `--no-cache` | ✅ Done |
 
 ---
 
@@ -138,11 +138,14 @@ Every file in the production system.
 | File | Description | Status |
 |------|-------------|--------|
 | `src/modules/policy/policy.module.ts` | Policy module (+ LlmService + SandboxService + SettingsModule) | ✅ Done |
-| `src/modules/policy/policy.service.ts` | Draft workflow + async LLM explanation + simulate | ✅ Done |
-| `src/modules/policy/policy.controller.ts` | REST endpoints + GET explain + POST simulate | ✅ Done |
+| `src/modules/policy/policy.service.ts` | Draft workflow + lazy LLM explanation backfill + simulate + per-draft chat (`chatWithDraft`, `getChatHistory`, `bootstrapChat`) + 5-min compliance score cache | ✅ Done |
+| `src/modules/policy/policy.controller.ts` | REST endpoints: explain, simulate, compliance, **GET/POST `/drafts/:id/chat`** (SSE stream) | ✅ Done |
 | `src/modules/policy/policy.dto.ts` | Request DTOs | ✅ Done |
-| `src/modules/policy/llm.service.ts` | Calls Ollama /api/generate, parses LLM JSON response | ✅ Done |
+| `src/modules/policy/llm.service.ts` | Calls Ollama `/api/generate` (explain, compliance) and `/api/chat` (streaming chat); robust to empty/error responses when no model is loaded | ✅ Done |
 | `src/modules/policy/sandbox.service.ts` | Simulates policy against historical traffic (pure-JS) | ✅ Done |
+| `src/modules/anomaly/anomaly.controller.ts` | Read routes + **PATCH `:id/resolve`**, **PATCH `:id/whitelist`**, **POST `:id/block-ip`** (drafts a deny policy from the anomaly's source IP) | ✅ Done |
+| `src/modules/database/entities/policy-draft.entity.ts` | `policy_drafts` row. New `chatHistory` jsonb column persists the AI chat conversation per draft | ✅ Done |
+| `src/modules/k8s/istio.builder.ts` | YAML builder for AuthorizationPolicy/PeerAuthentication. `needsQuoting()` now quotes values containing `:`, `#`, flow chars, or leading whitespace so colons in annotation values don't break `js-yaml` | ✅ Done |
 
 ### Bootstrap
 | File | Description | Status |

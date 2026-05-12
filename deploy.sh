@@ -38,11 +38,23 @@ if ! command -v npm &> /dev/null; then
     exit 1
 fi
 
+if ! command -v docker &> /dev/null; then
+    echo -e "${RED}❌ docker not found. Please install Docker.${NC}"
+    exit 1
+fi
+
 # Check if minikube is running
 if ! minikube status &> /dev/null; then
     echo -e "${RED}❌ minikube is not running. Please start minikube first.${NC}"
     echo "Run: minikube start --cpus=4 --memory=8192"
     exit 1
+fi
+
+# Optional flag: --no-cache forces a clean image rebuild (recovers from stale layer caching).
+NO_CACHE_FLAG=""
+if [[ "${1:-}" == "--no-cache" ]]; then
+    NO_CACHE_FLAG="--no-cache"
+    echo -e "${YELLOW}ℹ️  --no-cache: Docker layers will be rebuilt from scratch${NC}"
 fi
 
 echo -e "${GREEN}✅ Prerequisites check passed${NC}"
@@ -82,17 +94,17 @@ echo -e "${GREEN}✅ PostgreSQL deployed${NC}"
 echo ""
 
 # Step 5: Build Docker image
-echo "🐳 Step 5: Building Docker image..."
+echo "🐳 Step 5: Building Orchestrator image..."
 eval $(minikube docker-env)
 
 cd app/orchestrator-api
-docker build -t zentrion/orchestrator-api:latest . || {
+docker build $NO_CACHE_FLAG -t zentrion/orchestrator-api:latest . || {
     echo -e "${RED}❌ Docker build failed${NC}"
     exit 1
 }
 cd ../..
 
-echo -e "${GREEN}✅ Docker image built${NC}"
+echo -e "${GREEN}✅ Orchestrator image built${NC}"
 echo ""
 
 # Step 6: Deploy Orchestrator
@@ -100,8 +112,15 @@ echo "🎯 Step 6: Deploying Orchestrator..."
 kubectl apply -f manifests/orchestrator-configmap.yaml
 kubectl apply -f manifests/orchestrator-deployment.yaml
 
+# If the deployment already exists, trigger a rollout-restart so it picks up
+# the freshly-built image (`imagePullPolicy: IfNotPresent` means an unchanged
+# tag won't be re-pulled automatically).
+if kubectl get deployment zentrion-orchestrator -n zentrion-system >/dev/null 2>&1; then
+    kubectl rollout restart deployment/zentrion-orchestrator -n zentrion-system >/dev/null
+fi
+
 echo "Waiting for Orchestrator to be ready..."
-kubectl wait --for=condition=ready pod -l app=zentrion-orchestrator -n zentrion-system --timeout=120s || {
+kubectl rollout status deployment/zentrion-orchestrator -n zentrion-system --timeout=180s || {
     echo -e "${YELLOW}⚠️  Orchestrator not ready yet. Checking logs...${NC}"
     kubectl logs -l app=zentrion-orchestrator -n zentrion-system --tail=50
     exit 1
@@ -109,21 +128,76 @@ kubectl wait --for=condition=ready pod -l app=zentrion-orchestrator -n zentrion-
 echo -e "${GREEN}✅ Orchestrator deployed${NC}"
 echo ""
 
-# Step 6b: Ollama runs on WSL2 host (NOT in cluster — GPU virtualisation doesn't reach inside minikube)
-echo "🤖 Step 6b: Ollama (WSL2 host)"
-echo -e "${YELLOW}   Ollama runs on the host, not inside the cluster.${NC}"
-echo "   Pods reach it at host.minikube.internal:11434"
-echo ""
-echo "   If not yet running:"
-echo "     ollama serve &"
-echo "     ollama pull qwen2.5:7b   # one-time, ~4.7 GB"
-echo ""
-# Verify Ollama is reachable from the host before continuing
-if curl -sf http://localhost:11434/api/tags > /dev/null 2>&1; then
-    echo -e "${GREEN}✅ Ollama is running on host (localhost:11434)${NC}"
+# Step 6b: Ollama (runs as a Docker container on the minikube network)
+# The orchestrator pod reaches it via the configured OLLAMA_HOST (192.168.49.3 by default).
+# Models are persisted on the host so they survive container restarts and removal.
+echo "🤖 Step 6b: Ollama (Docker container on 'minikube' network)"
+
+OLLAMA_HOME="${OLLAMA_HOME:-$HOME/.ollama}"
+OLLAMA_NETWORK="${OLLAMA_NETWORK:-minikube}"
+OLLAMA_IMAGE="${OLLAMA_IMAGE:-ollama/ollama}"
+OLLAMA_NAME="${OLLAMA_NAME:-ollama}"
+OLLAMA_MODEL="${OLLAMA_MODEL:-qwen2.5:7b}"
+
+mkdir -p "$OLLAMA_HOME"
+
+# We must talk to the host's Docker daemon, not minikube's — Ollama is a sibling
+# container, not a pod inside the cluster. Save & temporarily clear DOCKER_HOST
+# in case minikube docker-env was sourced earlier.
+saved_docker_host="${DOCKER_HOST:-}"
+saved_docker_tls="${DOCKER_TLS_VERIFY:-}"
+saved_docker_cert="${DOCKER_CERT_PATH:-}"
+unset DOCKER_HOST DOCKER_TLS_VERIFY DOCKER_CERT_PATH
+
+needs_recreate=0
+if docker inspect "$OLLAMA_NAME" >/dev/null 2>&1; then
+    mount_src=$(docker inspect "$OLLAMA_NAME" --format '{{range .Mounts}}{{if eq .Destination "/root/.ollama"}}{{.Source}}{{end}}{{end}}')
+    net_mode=$(docker inspect "$OLLAMA_NAME" --format '{{.HostConfig.NetworkMode}}')
+    restart_pol=$(docker inspect "$OLLAMA_NAME" --format '{{.HostConfig.RestartPolicy.Name}}')
+    if [[ "$mount_src" != "$OLLAMA_HOME" || "$net_mode" != "$OLLAMA_NETWORK" || "$restart_pol" != "unless-stopped" ]]; then
+        echo -e "${YELLOW}   Container exists but has wrong volume/network/restart config — recreating...${NC}"
+        docker rm -f "$OLLAMA_NAME" >/dev/null
+        needs_recreate=1
+    else
+        echo "   Existing 'ollama' container is correctly configured."
+        docker start "$OLLAMA_NAME" >/dev/null 2>&1 || true
+    fi
 else
-    echo -e "${YELLOW}⚠️  Ollama not detected on localhost:11434. Start it with: ollama serve &${NC}"
+    needs_recreate=1
 fi
+
+if [[ "$needs_recreate" == "1" ]]; then
+    echo "   Creating 'ollama' container with persistent volume at $OLLAMA_HOME..."
+    docker run -d \
+        --name "$OLLAMA_NAME" \
+        --network "$OLLAMA_NETWORK" \
+        --restart unless-stopped \
+        -v "$OLLAMA_HOME":/root/.ollama \
+        -p 11434:11434 \
+        "$OLLAMA_IMAGE" >/dev/null
+fi
+
+# Wait for the API to come up.
+for _ in {1..20}; do
+    if docker exec "$OLLAMA_NAME" sh -c 'wget -qO- http://127.0.0.1:11434/api/tags' >/dev/null 2>&1; then
+        break
+    fi
+    sleep 1
+done
+
+# Pull the model if it isn't already loaded. This is idempotent and skipped when present.
+if ! docker exec "$OLLAMA_NAME" ollama list | awk 'NR>1 {print $1}' | grep -Fxq "$OLLAMA_MODEL"; then
+    echo "   Pulling $OLLAMA_MODEL (~4.7 GB, one-time)..."
+    docker exec "$OLLAMA_NAME" ollama pull "$OLLAMA_MODEL"
+fi
+
+ollama_ip=$(docker inspect "$OLLAMA_NAME" --format '{{(index .NetworkSettings.Networks "'"$OLLAMA_NETWORK"'").IPAddress}}')
+echo -e "${GREEN}✅ Ollama up at ${ollama_ip}:11434 (model: $OLLAMA_MODEL, store: $OLLAMA_HOME)${NC}"
+
+# Restore minikube docker-env if it was set before this section.
+[[ -n "$saved_docker_host" ]] && export DOCKER_HOST="$saved_docker_host"
+[[ -n "$saved_docker_tls" ]]  && export DOCKER_TLS_VERIFY="$saved_docker_tls"
+[[ -n "$saved_docker_cert" ]] && export DOCKER_CERT_PATH="$saved_docker_cert"
 echo ""
 
 # Step 6c: FastAPI ML Service reminder
@@ -200,7 +274,7 @@ echo ""
 eval $(minikube docker-env)
 
 cd app/dashboard
-docker build -t zentrion/dashboard:latest . || {
+docker build $NO_CACHE_FLAG -t zentrion/dashboard:latest . || {
     echo -e "${RED}❌ Dashboard Docker build failed${NC}"
     exit 1
 }
@@ -214,8 +288,13 @@ echo "🚀 Step 11: Deploying Dashboard..."
 kubectl apply -f manifests/dashboard-configmap.yaml
 kubectl apply -f manifests/dashboard-deployment.yaml
 
+# Rollout-restart so the freshly-built image is picked up on re-runs.
+if kubectl get deployment zentrion-dashboard -n zentrion-system >/dev/null 2>&1; then
+    kubectl rollout restart deployment/zentrion-dashboard -n zentrion-system >/dev/null
+fi
+
 echo "Waiting for Dashboard to be ready..."
-kubectl wait --for=condition=ready pod -l app=zentrion-dashboard -n zentrion-system --timeout=180s || {
+kubectl rollout status deployment/zentrion-dashboard -n zentrion-system --timeout=180s || {
     echo -e "${RED}❌ Dashboard failed to start${NC}"
     kubectl logs -l app=zentrion-dashboard -n zentrion-system --tail=50
     exit 1
@@ -250,15 +329,15 @@ echo ""
 echo "🔧 Useful Commands:"
 echo "  • View API logs:     kubectl logs -f -l app=zentrion-orchestrator -n zentrion-system"
 echo "  • View dash logs:    kubectl logs -f -l app=zentrion-dashboard -n zentrion-system"
-echo "  • View Ollama logs:  kubectl logs -f -n zentrion-system deploy/ollama"
+echo "  • View Ollama logs:  docker logs -f ollama"
 echo "  • Get pods:          kubectl get pods -n zentrion-system"
 echo "  • Get CRDs:          kubectl get securityprofiles,anomalyrecords,policyhistories -A"
 echo "  • Restart API:       kubectl rollout restart deployment/zentrion-orchestrator -n zentrion-system"
 echo "  • Open Kiali:        istioctl dashboard kiali"
 echo ""
 echo "🤖 AI Layer:"
-echo "  • Ollama (host):     curl http://localhost:11434/api/tags"
-echo "  • Ollama logs:       journalctl --user -u ollama -f   (or check your terminal)"
+echo "  • Ollama API:        curl http://localhost:11434/api/tags"
+echo "  • Ollama models:     docker exec ollama ollama list"
 echo "  • Start ML service:  cd ai/anomaly_detector && uvicorn serve:app --host 0.0.0.0 --port 8000"
 echo "  • Enable AI mode:    Dashboard → Settings → Detection Mode → AI-Powered"
 echo "  • Run attack sim:    cd ai/attack_sim && ./run_all.sh"

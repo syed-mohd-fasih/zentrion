@@ -19,11 +19,11 @@ Before deploying, ensure you have completed **ENVIRONMENT_SETUP.md**:
 | Component | Minimum | Recommended |
 |-----------|---------|-------------|
 | RAM | 16 GB | 32 GB |
-| Disk | 30 GB free | 50 GB free (minikube + 15 GB Ollama PVC) |
+| Disk | 30 GB free | 50 GB free (minikube + ~5 GB for qwen2.5:7b) |
 | CPU | 4 cores | 8 cores |
 | GPU | — | RTX 4000+ (optional, ~10× faster inference) |
 
-> **Note:** Ollama stores qwen2.5:7b (~4.7 GB) on a PersistentVolumeClaim inside minikube. The model is downloaded once on first boot; subsequent pod restarts skip the download. The FastAPI ML service runs on the **host machine** (not in the cluster) since it needs CPU only and avoids adding another container to an already busy node.
+> **Note:** Ollama runs as a **sibling Docker container on the `minikube` network** (not inside the cluster). Its models are persisted on the host at `~/.ollama/` so they survive container restarts and removal. The FastAPI ML service also runs on the host (not in the cluster) since it needs CPU only and avoids adding another container to an already busy node.
 
 ---
 
@@ -39,16 +39,22 @@ This script will:
 2. Apply all CRDs
 3. Apply RBAC
 4. Deploy PostgreSQL
-5. Build and deploy the Orchestrator
-6. Deploy Ollama in-cluster (LLM for policy explanations)
+5. Build the Orchestrator image and deploy it (auto-rollout if already running)
+6. Ensure the **Ollama Docker container** is up with a persistent volume and pull `qwen2.5:7b` if missing
 7. Print instructions for starting the FastAPI ML service on the host
 8. Wait for all pods to be ready
 9. Port-forward to localhost
-10. Build and deploy the Dashboard
+10. Build and deploy the Dashboard (auto-rollout)
 
 > **After the script finishes**, start the FastAPI ML service manually (see [AI Layer Setup](#-ai-layer-setup)) and optionally run the attack simulation scripts to generate training data.
 
-**Requirements:** `node` ≥ 20 and `npm` must be on your PATH before running the script.
+**Requirements:** `node` ≥ 20, `npm`, and `docker` must be on your PATH before running the script.
+
+**Re-running:** safe to re-run any time — `deploy.sh` is idempotent. Pass `--no-cache` to force a clean image rebuild (useful when Docker's layer cache misses a source change):
+
+```bash
+./deploy.sh --no-cache
+```
 
 ---
 
@@ -212,30 +218,34 @@ curl -X POST http://localhost:3001/auth/login \
 
 ## 🤖 **AI Layer Setup**
 
-### Step 7a: Ollama (In-Cluster LLM)
+### Step 7a: Ollama (Sibling Docker container on the `minikube` network)
 
-Ollama is deployed automatically by `deploy.sh` via `manifests/ollama.yaml`. It runs as a Kubernetes Deployment in `zentrion-system` with a 15 Gi PVC for model storage.
+Ollama is **not** deployed as a Kubernetes pod. It runs as a standalone Docker container attached to the same `minikube` Docker network as the cluster, and orchestrator pods reach it at `192.168.49.3:11434` (see `OLLAMA_HOST` in `manifests/orchestrator-configmap.yaml`).
+
+`deploy.sh` manages the container's lifecycle and ensures the **model files are persisted on the host** at `$HOME/.ollama`, so they survive container restarts AND `docker rm`. If the container is missing or has the wrong mount/network/restart-policy, `deploy.sh` recreates it correctly.
 
 ```bash
-# Apply manually if not using deploy.sh
-kubectl apply -f manifests/ollama.yaml
+# Verify the container is running with the right config
+docker inspect ollama --format '{{(index .Mounts 0).Source}} -> {{(index .Mounts 0).Destination}} | {{.HostConfig.NetworkMode}} | {{.HostConfig.RestartPolicy.Name}}'
+# Expect: /home/<you>/.ollama -> /root/.ollama | minikube | unless-stopped
 
-# Monitor the first-time model download (~4.7 GB, one-time only)
-kubectl logs -n zentrion-system deploy/ollama -f
-# Done when you see: "Ollama ready."
+# Check available models
+docker exec ollama ollama list
 
-# Check readiness
-kubectl get pods -n zentrion-system -l app=ollama
-# READY 1/1 means Ollama is serving and qwen2.5:7b is loaded
+# Tail Ollama logs
+docker logs -f ollama
 ```
 
-> **First boot note:** `livenessProbe.initialDelaySeconds` is set to 90 s to allow the model pull to complete before Kubernetes starts health-checking. If the pod is in `0/1 Running` for several minutes, that is normal — it is downloading the model.
+> **Model persistence:** All models live in the host bind mount `~/.ollama/`. Removing or recreating the container does NOT delete them — re-creating the container with the same bind mount picks them up immediately. If you ever see `{"models":[]}` after a container recreate, you removed the container without the `-v ~/.ollama:/root/.ollama` flag. Run `deploy.sh` and it will fix the config.
 
-**Optional GPU support:**  
-The Ollama manifest contains a commented-out GPU resource block. To enable it:
-1. Verify GPU works in minikube pods: `kubectl run gpu-test --image=nvidia/cuda:12.0-base --restart=Never -- nvidia-smi`
-2. Uncomment the `nvidia.com/gpu` resource block in `manifests/ollama.yaml`
-3. Re-apply: `kubectl apply -f manifests/ollama.yaml`
+**Manual one-liner (only if you can't run `deploy.sh`):**
+```bash
+docker run -d --name ollama --network minikube --restart unless-stopped \
+  -v "$HOME/.ollama":/root/.ollama -p 11434:11434 ollama/ollama
+docker exec ollama ollama pull qwen2.5:7b
+```
+
+> **GPU note:** Because Ollama runs in Docker outside the cluster, GPU pass-through is handled by the Docker daemon, not Kubernetes. Add `--gpus all` to the `docker run` command above if you have NVIDIA Container Toolkit installed.
 
 ---
 
@@ -410,12 +420,17 @@ kubectl exec -it -n zentrion-system deployment/postgresql -- psql -U zentrion -d
 ### 4b. Ollama is Ready
 
 ```bash
-kubectl get pods -n zentrion-system -l app=ollama
-# READY should be 1/1
+# Container is up
+docker ps --filter name=ollama --format '{{.Status}}'
+# Expect: Up <time>
 
 # Confirm the model is loaded
-kubectl exec -n zentrion-system deploy/ollama -- ollama list
+docker exec ollama ollama list
 # Should show: qwen2.5:7b
+
+# Confirm orchestrator can reach it from inside the cluster
+kubectl exec -n zentrion-system deploy/zentrion-orchestrator -- \
+  wget -qO- --timeout=5 http://192.168.49.3:11434/api/tags
 ```
 
 ---
@@ -822,17 +837,18 @@ That's it! Your Zentrion system is deployed and operational.
 
 ## 🗑️ **AI Layer Cleanup**
 
-To remove only the AI components without touching the rest of the cluster:
+To remove only the Ollama container without losing the downloaded models:
 
 ```bash
-kubectl delete -f manifests/ollama.yaml
-# This removes the Ollama Deployment, Service, and PVC (model weights deleted)
+docker stop ollama && docker rm ollama
+# Models on the host at ~/.ollama are preserved
 ```
 
-To keep the PVC (so the model doesn't need to be re-downloaded next time):
+To also delete the model files from the host (frees ~5 GB):
 
 ```bash
-kubectl delete deployment ollama -n zentrion-system
-kubectl delete service ollama -n zentrion-system
-# Leave the PVC intact
+docker stop ollama && docker rm ollama
+rm -rf ~/.ollama
 ```
+
+Re-running `./deploy.sh` will recreate the container with the right bind mount and (if present) reuse the existing models with no re-download.
