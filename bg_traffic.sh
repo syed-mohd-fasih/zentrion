@@ -150,10 +150,18 @@ PY
 
   # `nohup … &` detaches from terminal; setsid puts the child in its
   # own process group so 'stop' can kill the whole tree cleanly.
+  #
+  # `sleep infinity | kubectl exec -i` keeps the kubectl exec stdin open
+  # for the lifetime of the wrapper. Without this, nohup redirects stdin
+  # from /dev/null → kubectl forwards immediate EOF to the pod →
+  # the in-pod Python stdin-watchdog fires and exits ~instantly.
+  # When the wrapper process group is killed (cmd_stop or terminal close),
+  # the `sleep` dies too, the pipe closes, kubectl exec sees EOF, and the
+  # in-pod watchdog cleanly tears down the loop.
   nohup setsid bash -c "
     echo \"[bg-traffic] target pod: ${NAMESPACE}/${pod}\"
     echo \"[bg-traffic] delay: ${MIN_DELAY}-${MAX_DELAY}s per request\"
-    MIN_DELAY='${MIN_DELAY}' MAX_DELAY='${MAX_DELAY}' \
+    sleep infinity | \
       kubectl exec -i -n '${NAMESPACE}' '${pod}' -- \
       env MIN_DELAY='${MIN_DELAY}' MAX_DELAY='${MAX_DELAY}' \
       python3 -u -c '$(printf '%s' "$generator_py" | sed "s/'/'\\\\''/g")'
