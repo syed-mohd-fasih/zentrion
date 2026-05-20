@@ -1,4 +1,6 @@
 {
-  "0": "NORMAL",
-  "1": "SUSPICIOUS_PATTERN"
+  "0": "HIGH_ERROR_RATE",
+  "1": "NORMAL",
+  "2": "SUSPICIOUS_PATTERN",
+  "3": "UNAUTHORIZED_ACCESS"
 }

@@ -62,7 +62,7 @@ def fetch_anomaly_labels(conn) -> dict:
     return label_map
 
 
-def compute_features(group: pd.DataFrame, label_map: dict) -> dict:
+def compute_features(group: pd.DataFrame, label_map: dict, window_seconds: int = 300) -> dict:
     n = len(group)
     latencies = group["latency_ms"].sort_values().values
     errors = group[group["status"] >= 400]
@@ -94,7 +94,7 @@ def compute_features(group: pd.DataFrame, label_map: dict) -> dict:
         "mean_latency_ms": float(latencies.mean()) if n > 0 else 0,
         "unique_source_ips": group["source_ip"].nunique(),
         "unique_paths": group["path"].nunique(),
-        "req_per_second": n / (5 * 60),
+        "req_per_second": n / window_seconds if window_seconds > 0 else 0,
         "status_4xx_rate": len(logs_4xx) / n if n > 0 else 0,
         "status_5xx_rate": len(logs_5xx) / n if n > 0 else 0,
         "max_latency_ms": float(latencies.max()) if n > 0 else 0,
@@ -126,14 +126,17 @@ def main():
 
     conn.close()
 
-    # Create 5-minute window buckets
+    # Bucket logs into windows. 1-min buckets give more samples on short
+    # experiments; override with WINDOW=5min for the original behaviour.
+    window_size = os.getenv("WINDOW", "1min")
     logs["timestamp"] = pd.to_datetime(logs["timestamp"], utc=True)
-    logs["window"] = logs["timestamp"].dt.floor("5min")
+    logs["window"] = logs["timestamp"].dt.floor(window_size)
 
-    print("Computing features per (service, 5-min window)...")
+    print(f"Computing features per (service, {window_size} window)...")
+    window_seconds = int(pd.Timedelta(window_size).total_seconds())
     rows = []
     for (service, window), group in logs.groupby(["service", "window"]):
-        rows.append(compute_features(group, label_map))
+        rows.append(compute_features(group, label_map, window_seconds))
 
     df = pd.DataFrame(rows)
     out_path = os.path.join(os.path.dirname(__file__), "training_data.csv")
