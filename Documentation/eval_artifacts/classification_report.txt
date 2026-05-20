@@ -1,0 +1,10 @@
+                     precision    recall  f1-score   support
+
+    HIGH_ERROR_RATE       0.50      1.00      0.67         1
+             NORMAL       0.33      1.00      0.50         1
+ SUSPICIOUS_PATTERN       1.00      0.86      0.92        14
+UNAUTHORIZED_ACCESS       1.00      0.86      0.92         7
+
+           accuracy                           0.87        23
+          macro avg       0.71      0.93      0.75        23
+       weighted avg       0.95      0.87      0.89        23

@@ -1,0 +1,13 @@
+{
+  "drafts_total": 0,
+  "drafts_by_status": {},
+  "anomalies_total": 979,
+  "anomalies_by_type": {
+    "UNAUTHORIZED_ACCESS": 296,
+    "HIGH_ERROR_RATE": 293,
+    "SUSPICIOUS_PATTERN": 301,
+    "TRAFFIC_SPIKE": 89
+  },
+  "review_time_s": null,
+  "apply_time_s": null
+}

@@ -1,0 +1,113 @@
+{
+  "draft_count": 40,
+  "trials_per_cell": 200,
+  "review_latencies_s": [
+    30,
+    120,
+    300,
+    900
+  ],
+  "accept_rates": [
+    0.6,
+    0.75,
+    0.9
+  ],
+  "results": [
+    {
+      "median_time_to_apply_s": 20.621397959874862,
+      "p95_time_to_apply_s": 32.462402380832025,
+      "applied_count_mean": 23.89,
+      "rejected_count_mean": 16.11,
+      "mean_review_s": 30,
+      "accept_p": 0.6
+    },
+    {
+      "median_time_to_apply_s": 20.647936117012776,
+      "p95_time_to_apply_s": 30.02945306078976,
+      "applied_count_mean": 29.85,
+      "rejected_count_mean": 10.15,
+      "mean_review_s": 30,
+      "accept_p": 0.75
+    },
+    {
+      "median_time_to_apply_s": 20.024818896963843,
+      "p95_time_to_apply_s": 29.825356108314647,
+      "applied_count_mean": 36.015,
+      "rejected_count_mean": 3.985,
+      "mean_review_s": 30,
+      "accept_p": 0.9
+    },
+    {
+      "median_time_to_apply_s": 83.10251120790124,
+      "p95_time_to_apply_s": 122.9400938749313,
+      "applied_count_mean": 24.1,
+      "rejected_count_mean": 15.9,
+      "mean_review_s": 120,
+      "accept_p": 0.6
+    },
+    {
+      "median_time_to_apply_s": 81.55532305208905,
+      "p95_time_to_apply_s": 121.11642197177768,
+      "applied_count_mean": 29.865,
+      "rejected_count_mean": 10.135,
+      "mean_review_s": 120,
+      "accept_p": 0.75
+    },
+    {
+      "median_time_to_apply_s": 84.65696627584238,
+      "p95_time_to_apply_s": 126.00772665680032,
+      "applied_count_mean": 36.17,
+      "rejected_count_mean": 3.83,
+      "mean_review_s": 120,
+      "accept_p": 0.9
+    },
+    {
+      "median_time_to_apply_s": 206.1715705326322,
+      "p95_time_to_apply_s": 314.9037516553446,
+      "applied_count_mean": 23.935,
+      "rejected_count_mean": 16.065,
+      "mean_review_s": 300,
+      "accept_p": 0.6
+    },
+    {
+      "median_time_to_apply_s": 208.39427659413033,
+      "p95_time_to_apply_s": 316.6561249377359,
+      "applied_count_mean": 29.68,
+      "rejected_count_mean": 10.32,
+      "mean_review_s": 300,
+      "accept_p": 0.75
+    },
+    {
+      "median_time_to_apply_s": 209.81470159601912,
+      "p95_time_to_apply_s": 304.94027427844435,
+      "applied_count_mean": 36.01,
+      "rejected_count_mean": 3.99,
+      "mean_review_s": 300,
+      "accept_p": 0.9
+    },
+    {
+      "median_time_to_apply_s": 608.9512267532832,
+      "p95_time_to_apply_s": 969.0288394148445,
+      "applied_count_mean": 23.865,
+      "rejected_count_mean": 16.135,
+      "mean_review_s": 900,
+      "accept_p": 0.6
+    },
+    {
+      "median_time_to_apply_s": 653.6538369760469,
+      "p95_time_to_apply_s": 932.2481655204405,
+      "applied_count_mean": 29.885,
+      "rejected_count_mean": 10.115,
+      "mean_review_s": 900,
+      "accept_p": 0.75
+    },
+    {
+      "median_time_to_apply_s": 618.6332709887363,
+      "p95_time_to_apply_s": 859.2137782037166,
+      "applied_count_mean": 36.17,
+      "rejected_count_mean": 3.83,
+      "mean_review_s": 900,
+      "accept_p": 0.9
+    }
+  ]
+}
