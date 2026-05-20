@@ -35,7 +35,7 @@ echo ""
 echo "======================================================"
 echo "Attack phase complete. Running baseline traffic for 5 minutes..."
 echo "======================================================"
-python3normal_traffic.py --url "$URL" --duration 300
+python3 normal_traffic.py --url "$URL" --duration 300
 
 echo ""
 echo "Done. Check the Zentrion dashboard for detected anomalies."
